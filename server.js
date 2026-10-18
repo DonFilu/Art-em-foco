@@ -43,6 +43,19 @@ if(pathname==='/api/community/search'){
  if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});
  try{const me=await sessionUser(req);if(!me)return json(res,401,{error:'Entre com Google'});const q=(new URL(req.url,'http://localhost').searchParams.get('q')||'').trim().replace(/^@/,'').toLowerCase();if(q.length<2||q.length>50||!/^[a-z0-9_-]+$/.test(q))return json(res,400,{error:'Pesquisa inválida'});const db=await getDatabase();const artists=await db.collection('users').find({$or:[{username:{$regex:'^'+q}},{artId:{$regex:'^'+q.toUpperCase()}}]}).limit(12).toArray();return json(res,200,{artists:artists.filter(u=>u.artId!==me.artId).map(publicUser)})}catch{return json(res,503,{error:'Não foi possível pesquisar artistas'})}
 }
+
+if(pathname==='/api/community/profile'){
+ if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});
+ try{
+ const me=await sessionUser(req);if(!me)return json(res,401,{error:'Faça login'});
+ const id=new URL(req.url,'http://localhost').searchParams.get('id')||'';
+ if(!/^AEF-\d{8,}$/.test(id))return json(res,400,{error:'ID inválido'});
+ const db=await getDatabase(),artist=await db.collection('users').findOne({artId:id});
+ if(!artist)return json(res,404,{error:'Artista não encontrado'});
+ const relation=await db.collection('friendships').findOne({pair:[me.artId,id].sort().join(':')});
+ return json(res,200,{artist:publicUser(artist),friendship:relation?{status:relation.status,direction:relation.requester===me.artId?'sent':'received'}:null});
+ }catch{return json(res,503,{error:'Não foi possível abrir o perfil'})}
+}
 if(pathname==='/api/community/friends'){
  if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});
  try{const me=await sessionUser(req);if(!me)return json(res,401,{error:'Faça login'});const db=await getDatabase(),relations=await db.collection('friendships').find({members:me.artId}).limit(200).toArray(),ids=relations.map(r=>r.members.find(id=>id!==me.artId)),users=await db.collection('users').find({artId:{$in:ids}}).toArray(),byId=new Map(users.map(u=>[u.artId,publicUser(u)]));return json(res,200,{friends:relations.map(r=>({artist:byId.get(r.members.find(id=>id!==me.artId)),status:r.status,direction:r.requester===me.artId?'sent':'received'})).filter(r=>r.artist)})}catch{return json(res,503,{error:'Não foi possível carregar amigos'})}
