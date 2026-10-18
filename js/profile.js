@@ -1,0 +1,9 @@
+(()=>{'use strict';
+const $=id=>document.getElementById(id),area=$('artistAccount'),dialog=$('profileDialog'),name=$('profileName'),bio=$('profileBio'),msg=$('profileMessage');
+function render(){const u=window.artEmFocoUser;area.replaceChildren();const btn=document.createElement('button');btn.type='button';btn.className='artist-account-button';if(u){if(u.picture){const img=document.createElement('img');img.src=u.picture;img.alt='';img.referrerPolicy='no-referrer';btn.append(img)}const span=document.createElement('span');span.textContent=u.name;btn.append(span);btn.onclick=()=>open()}else{btn.textContent='Visitante · Entrar';btn.onclick=()=>{location.reload()}}area.append(btn)}
+function open(){const u=window.artEmFocoUser;if(!u)return;name.value=u.name;bio.value=u.bio||'';$('profileId').textContent=u.id;$('profileEmail').textContent=u.email;msg.textContent='';dialog.showModal()}
+$('profileClose').onclick=()=>dialog.close();
+$('profileForm').onsubmit=async e=>{e.preventDefault();msg.textContent='Salvando...';try{const r=await fetch('/api/profile',{method:'PATCH',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name.value,bio:bio.value})});const result=await r.json();if(!r.ok)throw new Error(result.error);window.artEmFocoUser=result.user;render();msg.textContent='Perfil atualizado!'}catch(e){msg.textContent=e.message||'Erro ao salvar'}};
+$('profileLogout').onclick=async()=>{msg.textContent='Saindo...';try{const r=await fetch('/api/auth/logout',{method:'POST',credentials:'same-origin'});if(!r.ok)throw new Error();window.google?.accounts?.id?.disableAutoSelect?.();window.artEmFocoUser=null;location.reload()}catch{msg.textContent='Não foi possível sair. Tente novamente.'}};
+window.addEventListener('artemfoco:authenticated',render);window.addEventListener('artemfoco:entered',render);render();
+})();
