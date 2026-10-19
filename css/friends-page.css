@@ -1,2 +1,22 @@
 *{box-sizing:border-box}body{margin:0;background:#12111d;color:#f5f2ff;font:16px system-ui,-apple-system,sans-serif}.shell{max-width:980px;margin:auto;padding:18px 16px 70px}.top{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-bottom:25px}.top a{background:#302943;border:1px solid #665783;border-radius:12px;padding:12px 18px;text-decoration:none;color:#fff;font-weight:700}.top strong{font-size:19px}.top span{color:#bca8ff}h1{font-size:clamp(28px,5vw,38px);margin:0 0 5px}header p{color:#bbb2d0}h2{font-size:20px;margin:0 0 16px}h2 span{color:#bba8fa}.search-panel,.friends-panel{background:#211d31;border:1px solid #403852;border-radius:18px;padding:22px;margin:20px 0}.search-panel form{display:flex;gap:10px}.search-panel input{min-width:0;flex:1;background:#14121f;border:1px solid #62547d;border-radius:11px;color:white;padding:13px;font:inherit}button{border:0;border-radius:11px;padding:11px 14px;background:#8c72f3;color:white;font-weight:700;cursor:pointer}button:hover{filter:brightness(1.12)}.friend-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(245px,1fr));gap:12px}.friend-card{border:1px solid #504663;background:#2b253c;border-radius:14px;padding:15px;display:flex;flex-direction:column;gap:12px}.friend-person{display:flex;align-items:center;gap:11px;text-decoration:none;color:#fff}.friend-person:hover strong{text-decoration:underline}.avatar{width:46px;height:46px;flex:none;border-radius:50%;background:linear-gradient(135deg,#8b6ef3,#49396c);display:grid;place-items:center;font-size:24px}.friend-details{display:grid;gap:3px;min-width:0}.friend-details strong{overflow-wrap:anywhere}.friend-details small{color:#bcb0d6;overflow-wrap:anywhere}.friend-actions{display:flex;gap:8px;flex-wrap:wrap}.friend-actions button{font-size:13px;padding:9px 11px}.friend-actions .muted{background:#514660}.friend-actions .danger{background:#77394f}.empty{color:#aaa2bf;padding:8px 0}#friendMessage{color:#c7b3ff;min-height:20px;font-size:14px}@media(max-width:500px){.shell{padding:12px 10px 55px}.search-panel,.friends-panel{padding:16px}.friend-grid{grid-template-columns:1fr}.top strong{font-size:15px}}
  .avatar{overflow:hidden}.avatar img{width:100%;height:100%;object-fit:cover}
+
+/* Amigos: identidade visual compartilhada com a Comunidade. */
+.friends-page{background:radial-gradient(ellipse at 72% -15%,#303040 0%,transparent 38%),#101217;color:#f3f2f0;font-size:14px}
+.friends-page .shell{width:min(100% - 64px,1000px);max-width:1000px;margin:0 auto 0 244px;padding:32px 24px 100px}
+.friends-page .top{display:none}
+.friends-page .shell>header{margin:0 0 24px}
+.friends-page .shell>header h1{font-size:clamp(25px,4vw,32px);letter-spacing:-.6px}
+.friends-page .shell>header p{color:#a7a9b3;line-height:1.5}
+.friends-page h2 span{color:#ffc28a}
+.friends-page .search-panel,.friends-page .friends-panel{background:#191c23;border-color:#30333d;border-radius:18px;margin:16px 0;padding:22px}
+.friends-page .search-panel input{background:#111318;border-color:#454752;color:#f3f2f0}
+.friends-page .search-panel button,.friends-page .friend-actions button{background:#e6ae76;color:#1b1714}
+.friends-page .friend-card{background:#20232b;border-color:#383c47}
+.friends-page .friend-details small,.friends-page .empty{color:#a7a9b3}
+.friends-page .friend-actions .muted{background:#353943;color:#f3f2f0}
+.friends-page .friend-actions .danger{background:#65343e;color:#fff}
+.friends-page #friendMessage{color:#ffc28a}
+@media(max-width:1120px){.friends-page .shell{width:calc(100% - 284px)}}
+@media(max-width:900px) and (min-width:761px){.friends-page .shell{margin-left:76px;width:calc(100% - 76px);padding:25px 20px 90px}}
+@media(max-width:760px){.friends-page{background:#111318}.friends-page .shell{width:100%;margin:0;padding:18px 12px 85px}.friends-page .search-panel,.friends-page .friends-panel{padding:16px;margin:14px 0}.friends-page .search-panel form{flex-wrap:wrap}.friends-page .search-panel form input{flex:1 1 180px}.friends-page .search-panel form button{flex:0 0 auto}}
