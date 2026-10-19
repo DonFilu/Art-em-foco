@@ -30,5 +30,5 @@
  }
  function render(){while(visible.size<2&&queue.length){const entry=queue.shift(),card=makeToast(entry);visible.set(entry.eventKey,card);list.append(card)}updateMore()}
  function enqueue(entries){for(const entry of entries){if(!entry?.eventKey||activeKeys.has(entry.eventKey)||dismissedKeys.has(entry.eventKey))continue;activeKeys.add(entry.eventKey);queue.push(entry)}render()}
- center.subscribe(({type,notifications,state})=>{if(type==='summary')enqueue(notifications);if(type==='new'){enqueue(notifications);if(notifications.length&&state.soundEnabled)play()}if(type==='signed-out'||type==='account-change')clearToasts()});
+ center.subscribe(({type,notifications,state})=>{if(type==='summary'){enqueue(notifications);if(notifications.length&&state.soundEnabled)play()}if(type==='new'){enqueue(notifications);if(notifications.length&&state.soundEnabled)play()}if(type==='signed-out'||type==='account-change')clearToasts()});
 })();
