@@ -35,7 +35,7 @@ async function route(req,res,pathname,{sessionUser,getDatabase,json}){
   if(pathname==='/api/notifications'){
    if(req.method!=='GET'){json(res,405,{error:'Método não permitido'});return true}
    const rows=await col.find({userId:user._id}).sort({createdAt:-1}).limit(100).toArray();
-   json(res,200,{notifications:rows.map(n=>({id:String(n._id),title:n.title,body:n.body,artistId:n.artistId||null,artistName:n.artistName||null,status:n.status||null,createdAt:n.createdAt,readAt:n.readAt||null}))});return true;
+   json(res,200,{viewerId:user.artId,soundEnabled:user.notificationSettings?.soundEnabled!==false,notifications:rows.map(n=>({id:String(n._id),title:n.title,body:n.body,artistId:n.artistId||null,artistName:n.artistName||null,status:n.status||null,createdAt:n.createdAt,readAt:n.readAt||null}))});return true;
   }
   if(req.method!=='PATCH'){json(res,405,{error:'Método não permitido'});return true}
   const id=new ObjectId(pathname.split('/')[3]);

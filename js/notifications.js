@@ -1,5 +1,7 @@
 (()=>{'use strict';
 const list=document.getElementById('notificationsList');if(!list)return;
+const requestedId=new URLSearchParams(location.search).get('id')||'';
+const selectedId=/^[0-9a-f]{24}$/.test(requestedId)?requestedId:null;
 const empty='<div class="notifications-empty"><div class="notifications-icon" aria-hidden="true">🔔</div><h2>Você ainda não tem notificações</h2><p>Quando houver novidades, elas aparecerão aqui.</p><a href="/comunidade.html">Explorar a comunidade →</a></div>';
 function message(text){list.replaceChildren();const p=document.createElement('p');p.className='notifications-message';p.textContent=text;list.append(p)}
 async function load(){
@@ -34,12 +36,14 @@ async function load(){
     }else{const status=document.createElement('span');status.textContent=n.status==='accepted'?'Pedido aceito':'Pedido recusado';actions.append(status)}
     actions.append(profile);detail.append(actions);
    }
-   btn.addEventListener('click',async()=>{
-    detail.hidden=!detail.hidden;btn.setAttribute('aria-expanded',String(!detail.hidden));hint.textContent=detail.hidden?'Toque para ler':'Toque para fechar';
-    if(!detail.hidden&&!n.readAt){
+   async function setOpen(open){
+    detail.hidden=!open;btn.setAttribute('aria-expanded',String(open));hint.textContent=open?'Toque para fechar':'Toque para ler';
+    if(open&&!n.readAt){
      try{const r=await fetch('/api/notifications/'+encodeURIComponent(n.id)+'/read',{method:'PATCH',credentials:'same-origin'});if(!r.ok)throw Error();n.readAt=new Date().toISOString();label.textContent='✓ Vista';card.classList.add('is-read')}catch{label.textContent='● Nova notificação'}
     }
-   });card.append(btn,detail);list.append(card)
+   }
+   btn.addEventListener('click',()=>setOpen(detail.hidden));card.append(btn,detail);list.append(card);
+   if(n.id===selectedId)setOpen(true)
   }
  }catch{message('Não foi possível carregar as notificações. Atualize a página para tentar novamente.')}
 }

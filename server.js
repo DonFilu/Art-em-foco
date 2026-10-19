@@ -5,7 +5,7 @@ const crypto=require('crypto');
 const {OAuth2Client}=require('google-auth-library');
 const {getDatabase,checkDatabase}=require('./db');
 const root=__dirname,port=process.env.PORT||3000,googleClient=new OAuth2Client();
-const mime={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.png':'image/png','.svg':'image/svg+xml'};
+const mime={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.png':'image/png','.svg':'image/svg+xml','.mp3':'audio/mpeg'};
 const SESSION_MS=30*24*60*60*1000;
 
 const {ObjectId}=require('mongodb');
@@ -114,6 +114,19 @@ if(pathname==='/api/auth/google'){
 if(await notifications.route(req,res,pathname,{sessionUser,getDatabase,json}))return;
 if(pathname==='/api/auth/me'){if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});try{const u=await sessionUser(req);return u?json(res,200,{user:safeUser(u)}):json(res,401,{error:'Sessão não encontrada'})}catch{return json(res,503,{error:'Banco de dados indisponível'})}}
 if(pathname==='/api/auth/logout'){if(req.method!=='POST')return json(res,405,{error:'Método não permitido'});try{const token=cookies(req).aef_session;if(token)await (await getDatabase()).collection('sessions').deleteOne({_id:crypto.createHash('sha256').update(token).digest('hex')});return json(res,200,{ok:true},{'Set-Cookie':cookie('',0)})}catch{return json(res,503,{error:'Não foi possível encerrar a sessão'})}}
+
+if(pathname==='/api/settings/notifications'){
+ if(!['GET','PATCH'].includes(req.method))return json(res,405,{error:'Método não permitido'});
+ try{
+  const user=await sessionUser(req);if(!user)return json(res,401,{error:'Faça login para acessar configurações'});
+  const soundEnabled=user.notificationSettings?.soundEnabled!==false;
+  if(req.method==='GET')return json(res,200,{soundEnabled});
+  const data=await readJSON(req);
+  if(!data||Array.isArray(data)||Object.keys(data).length!==1||!Object.prototype.hasOwnProperty.call(data,'soundEnabled')||typeof data.soundEnabled!=='boolean')return json(res,400,{error:'Configuração inválida'});
+  await (await getDatabase()).collection('users').updateOne({_id:user._id},{$set:{'notificationSettings.soundEnabled':data.soundEnabled,updatedAt:new Date()}});
+  return json(res,200,{soundEnabled:data.soundEnabled});
+ }catch(e){console.error('Erro nas configurações de notificação:',e.message);return json(res,503,{error:'Não foi possível salvar as configurações'})}
+}
 
 if(pathname==='/api/profile/image/upload'){
  if(req.method!=='POST')return json(res,405,{error:'Método não permitido'});
@@ -265,6 +278,7 @@ if(pathname==='/api/database/status'){if(req.method!=='GET')return json(res,405,
 if(pathname==='/')pathname='/index.html';
 if(pathname==='/politica-de-privacidade'||pathname==='/política-de-privacidade')pathname='/politica-de-privacidade.html';
 if(pathname==='/termos-de-uso')pathname='/termos-de-uso.html';
+if(pathname==='/configuracoes'||pathname==='/configurações')pathname='/configuracoes.html';
 if(['/db.js','/server.js','/package.json','/package-lock.json'].includes(pathname)||pathname.startsWith('/.')){res.writeHead(404);return res.end('Não encontrado')}
 const file=path.resolve(root,'.'+pathname);if(file!==root&&!file.startsWith(root+path.sep)){res.writeHead(403);return res.end('Acesso negado')}
 fs.readFile(file,(err,data)=>{if(err){res.writeHead(err.code==='ENOENT'?404:500);return res.end('Arquivo indisponível')}res.writeHead(200,{'Content-Type':mime[path.extname(file)]||'application/octet-stream','X-Content-Type-Options':'nosniff'});res.end(data)})
