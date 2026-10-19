@@ -7,6 +7,47 @@ const {getDatabase,checkDatabase}=require('./db');
 const root=__dirname,port=process.env.PORT||3000,googleClient=new OAuth2Client();
 const mime={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.png':'image/png','.svg':'image/svg+xml'};
 const SESSION_MS=30*24*60*60*1000;
+
+const {ObjectId}=require('mongodb');
+const ART_MAX=5*1024*1024;
+async function readArt(req){
+ const chunks=[];let size=0;for await(const part of req){size+=part.length;if(size>7*1024*1024)throw Error('Arquivo muito grande');chunks.push(part)}
+ const data=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+ if(typeof data.description!=='string'||data.description.length>1000||!['public','friends'].includes(data.visibility)||typeof data.image!=='string')throw Error('Dados de publicação inválidos');
+ const match=/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(data.image);
+ if(!match)throw Error('Formato de imagem inválido');
+ const buffer=Buffer.from(match[2],'base64'),mime=match[1];
+ if(!buffer.length||buffer.length>ART_MAX)throw Error('Arquivo muito grande (máximo 5 MB)');
+ const valid=mime==='image/png'?buffer.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')):mime==='image/jpeg'?buffer[0]===255&&buffer[1]===216&&buffer[2]===255:mime==='image/webp'?buffer.toString('ascii',0,4)==='RIFF'&&buffer.toString('ascii',8,12)==='WEBP':buffer.toString('ascii',0,3)==='GIF';
+ if(!valid)throw Error('Arquivo de imagem inválido');
+ return {buffer,mime,description:data.description.trim(),visibility:data.visibility,extension:mime.split('/')[1].replace('jpeg','jpg')};
+}
+async function uploadPrivateArt(art,user){
+ const key=process.env.IMAGEKIT_PRIVATE_KEY;if(!key)throw Error('ImageKit não configurado');
+ const form=new FormData();form.append('file',new Blob([art.buffer],{type:art.mime}),'art.'+art.extension);
+ form.append('fileName',crypto.randomUUID()+'.'+art.extension);
+ form.append('folder','/art-em-foco/publicacoes/'+user.artId+'/');
+ form.append('useUniqueFileName','true');form.append('isPrivateFile','true');
+ const response=await fetch('https://upload.imagekit.io/api/v1/files/upload',{method:'POST',headers:{Authorization:'Basic '+Buffer.from(key+':').toString('base64')},body:form,signal:AbortSignal.timeout(30000)});
+ const result=await response.json().catch(()=>({}));
+ if(!response.ok||!result.fileId||!result.url)throw Error('Falha no armazenamento da publicação ('+response.status+')');
+ return {fileId:result.fileId,url:result.url};
+}
+async function canViewArt(db,post,user){
+ if(post.visibility==='public'||user?.artId===post.authorId)return true;
+ if(!user)return false;
+ return !!await db.collection('friendships').findOne({pair:[user.artId,post.authorId].sort().join(':'),status:'accepted'});
+}
+function privateArtURL(url){
+ const key=process.env.IMAGEKIT_PRIVATE_KEY;if(!key)throw Error('ImageKit não configurado');
+ const u=new URL(url);if(u.protocol!=='https:')throw Error('URL inválida');
+ const expiry=Math.floor(Date.now()/1000)+45;
+ u.searchParams.set('ik-t',String(expiry));
+ const signature=crypto.createHmac('sha1',key).update(u.pathname+expiry).digest('hex');
+ u.searchParams.set('ik-s',signature);
+ return u.toString();
+}
+
 function json(res,status,body,headers={}){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers});res.end(JSON.stringify(body))}
 async function readJSON(req){let data='';for await(const chunk of req){data+=chunk;if(data.length>12000)throw new Error('Requisição muito grande')}return JSON.parse(data)}
 function cookies(req){return Object.fromEntries((req.headers.cookie||'').split(';').map(s=>s.trim().split('=').map(decodeURIComponent)).filter(a=>a.length===2))}
@@ -126,6 +167,45 @@ if(pathname==='/api/community/friends/respond'){
  if(req.method!=='POST')return json(res,405,{error:'Método não permitido'});
  try{const me=await sessionUser(req);if(!me)return json(res,401,{error:'Faça login'});const {artistId,action}=await readJSON(req);if(!['accept','decline','remove'].includes(action)||typeof artistId!=='string')return json(res,400,{error:'Ação inválida'});const db=await getDatabase(),col=db.collection('friendships'),pair=[me.artId,artistId].sort().join(':'),r=await col.findOne({pair,members:me.artId});if(!r)return json(res,404,{error:'Convite não encontrado'});if(action==='accept'){if(r.status!=='pending'||r.requester===me.artId)return json(res,403,{error:'Ação não permitida'});await col.updateOne({_id:r._id},{$set:{status:'accepted',updatedAt:new Date()}})}else{if(action==='decline'&&(r.status!=='pending'||r.requester===me.artId))return json(res,403,{error:'Ação não permitida'});await col.deleteOne({_id:r._id})}return json(res,200,{ok:true})}catch{return json(res,503,{error:'Não foi possível atualizar amizade'})}
 }
+
+if(pathname==='/api/art/publish'){
+ if(req.method!=='POST')return json(res,405,{error:'Método não permitido'});
+ try{
+  const user=await sessionUser(req);if(!user)return json(res,401,{error:'Entre com Google para publicar'});
+  const db=await getDatabase();
+  const recent=await db.collection('art_posts').countDocuments({authorId:user.artId,createdAt:{$gte:new Date(Date.now()-3600000)}});
+  if(recent>=10)return json(res,429,{error:'Limite de 10 publicações por hora'});
+  const art=await readArt(req),uploaded=await uploadPrivateArt(art,user);
+  const result=await db.collection('art_posts').insertOne({authorId:user.artId,description:art.description,visibility:art.visibility,mime:art.mime,fileId:uploaded.fileId,fileURL:uploaded.url,createdAt:new Date()});
+  return json(res,201,{ok:true,id:result.insertedId.toString()});
+ }catch(e){console.error('Falha ao publicar arte:',e.message);return json(res,/inválid|grande|limite/i.test(e.message)?400:503,{error:e.message||'Falha ao publicar'})}
+}
+if(pathname==='/api/art/posts'){
+ if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});
+ try{
+  const user=await sessionUser(req),db=await getDatabase(),params=new URL(req.url,'http://localhost').searchParams;
+  const author=params.get('author')||user?.artId||'';
+  if(!/^AEF-\d{8,}$/.test(author))return json(res,400,{error:'Artista inválido'});
+  const posts=await db.collection('art_posts').find({authorId:author}).sort({createdAt:-1}).limit(50).toArray();
+  const allowed=[];for(const post of posts){if(await canViewArt(db,post,user))allowed.push({id:post._id.toString(),authorId:post.authorId,description:post.description,visibility:post.visibility,createdAt:post.createdAt,image:'/api/art/media/'+post._id.toString()})}
+  return json(res,200,{posts:allowed});
+ }catch{return json(res,503,{error:'Não foi possível carregar publicações'})}
+}
+if(pathname.startsWith('/api/art/media/')){
+ if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});
+ const id=pathname.slice('/api/art/media/'.length);if(!/^[a-f0-9]{24}$/.test(id))return json(res,404,{error:'Imagem não encontrada'});
+ try{
+  const db=await getDatabase(),post=await db.collection('art_posts').findOne({_id:new ObjectId(id)});
+  if(!post)return json(res,404,{error:'Imagem não encontrada'});
+  const user=await sessionUser(req);if(!await canViewArt(db,post,user))return json(res,403,{error:'Acesso restrito'});
+  const upstream=await fetch(privateArtURL(post.fileURL),{signal:AbortSignal.timeout(20000),redirect:'error'});
+  if(!upstream.ok)return json(res,502,{error:'Imagem indisponível'});
+  const bytes=Buffer.from(await upstream.arrayBuffer());if(bytes.length>ART_MAX+1024)return json(res,502,{error:'Arquivo inválido'});
+  res.writeHead(200,{'Content-Type':post.mime,'Content-Length':bytes.length,'Cache-Control':'private, no-store, max-age=0','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Cross-Origin-Resource-Policy':'same-origin','X-Frame-Options':'DENY'});
+  return res.end(bytes);
+ }catch(e){console.error('Falha ao abrir arte:',e.message);return json(res,503,{error:'Não foi possível abrir a arte'})}
+}
+
 if(pathname==='/api/database/status'){if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});try{await checkDatabase();return json(res,200,{connected:true})}catch{return json(res,503,{connected:false})}}
 if(pathname==='/')pathname='/index.html';
 if(['/db.js','/server.js','/package.json','/package-lock.json'].includes(pathname)||pathname.startsWith('/.')){res.writeHead(404);return res.end('Não encontrado')}
