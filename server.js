@@ -155,8 +155,28 @@ if(pathname==='/api/community/profile'){
  const db=await getDatabase(),artist=await db.collection('users').findOne({artId:id});
  if(!artist)return json(res,404,{error:'Artista não encontrado'});
  const relation=await db.collection('friendships').findOne({pair:[me.artId,id].sort().join(':')});
- return json(res,200,{artist:publicUser(artist),friendship:relation?{status:relation.status,direction:relation.requester===me.artId?'sent':'received'}:null});
+ const friendsCount=await db.collection('friendships').countDocuments({members:id,status:'accepted'});
+ return json(res,200,{artist:publicUser(artist),friendsCount,canViewFriends:me.artId===id||relation?.status==='accepted',friendship:relation?{status:relation.status,direction:relation.requester===me.artId?'sent':'received'}:null});
  }catch{return json(res,503,{error:'Não foi possível abrir o perfil'})}
+}
+if(pathname==='/api/community/profile/friends'){
+ if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});
+ try{
+  const me=await sessionUser(req);if(!me)return json(res,401,{error:'Faça login'});
+  const id=new URL(req.url,'http://localhost').searchParams.get('id')||'';
+  if(!/^AEF-\\d{8,}$/.test(id))return json(res,400,{error:'ID inválido'});
+  const db=await getDatabase();
+  const artist=await db.collection('users').findOne({artId:id});
+  if(!artist)return json(res,404,{error:'Artista não encontrado'});
+  if(me.artId!==id){
+   const relation=await db.collection('friendships').findOne({pair:[me.artId,id].sort().join(':'),status:'accepted'});
+   if(!relation)return json(res,403,{error:'A lista de amigos é privada'});
+  }
+  const relations=await db.collection('friendships').find({members:id,status:'accepted'}).limit(200).toArray();
+  const ids=relations.map(r=>r.members.find(member=>member!==id));
+  const friends=await db.collection('users').find({artId:{$in:ids}}).toArray();
+  return json(res,200,{friends:friends.map(publicUser)});
+ }catch(e){console.error('Falha ao consultar amigos do artista:',e.message);return json(res,503,{error:'Não foi possível carregar a lista de amigos'})}
 }
 if(pathname==='/api/community/friends'){
  if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});
