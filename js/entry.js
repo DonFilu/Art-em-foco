@@ -1,7 +1,7 @@
 (()=>{'use strict';
 const screen=document.getElementById('entryScreen'),button=document.getElementById('entryButton'),mount=document.getElementById('googleSignIn'),message=document.getElementById('loginMessage');if(!screen||!button)return;
 if(new URLSearchParams(location.search).get('login')==='required')message.textContent='Entre com Google para acessar a Comunidade e os perfis. Você ainda pode criar projetos como visitante.';
-function enter(){screen.hidden=true;window.dispatchEvent(new Event('artemfoco:entered'))}
+function enter(){const hub=document.getElementById('hubScreen'),projects=document.getElementById('projectsScreen'),bar=document.getElementById('projectBar');if(projects)projects.hidden=true;if(bar)bar.hidden=true;if(hub)hub.hidden=false;screen.hidden=true;window.dispatchEvent(new Event('artemfoco:entered'))}
 function authenticated(user){window.artEmFocoUser=user;window.dispatchEvent(new CustomEvent('artemfoco:authenticated',{detail:user}));enter()}
 button.addEventListener('click',()=>{window.artEmFocoUser=null;enter()});
 async function restore(){try{const r=await fetch('/api/auth/me',{credentials:'same-origin',cache:'no-store'});if(r.ok){authenticated((await r.json()).user);return true}}catch{}return false}
