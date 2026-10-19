@@ -13,6 +13,39 @@ function cookies(req){return Object.fromEntries((req.headers.cookie||'').split('
 function cookie(token,maxAge){return 'aef_session='+encodeURIComponent(token||'')+'; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age='+maxAge}
 function safeUser(u){return {id:u.artId,name:u.displayName,picture:u.picture||'',email:u.email||'',username:u.username||u.artId.toLowerCase(),bio:u.bio||'',createdAt:u.createdAt,role:u.role||'artist',socials:u.socials||{},avatar:u.avatar||'',cover:u.cover||''}}
 function publicUser(u){return {id:u.artId,username:u.username||u.artId.toLowerCase(),name:u.displayName,bio:u.bio||'',avatar:u.avatar||'',socials:u.socials||{}}}
+
+async function readImageUpload(req){
+ let chunks=[],size=0;for await(const chunk of req){size+=chunk.length;if(size>7*1024*1024)throw Error('Imagem muito grande (máximo 5 MB)');chunks.push(chunk)}
+ const data=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+ if(!['avatar','cover'].includes(data.type)||typeof data.image!=='string')throw Error('Imagem inválida');
+ const match=/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(data.image);
+ if(!match)throw Error('Envie uma imagem PNG, JPG, WEBP ou GIF');
+ const buffer=Buffer.from(match[2],'base64');if(!buffer.length||buffer.length>5*1024*1024)throw Error('Imagem muito grande (máximo 5 MB)');
+ const magic=match[1]==='image/png'?buffer.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')):match[1]==='image/jpeg'?buffer[0]===255&&buffer[1]===216&&buffer[2]===255:match[1]==='image/webp'?buffer.toString('ascii',0,4)==='RIFF'&&buffer.toString('ascii',8,12)==='WEBP':buffer.toString('ascii',0,3)==='GIF';
+ if(!magic)throw Error('Formato de imagem inválido');
+ return {type:data.type,buffer,mime:match[1],extension:match[1].split('/')[1].replace('jpeg','jpg')};
+}
+async function discordImageUpload(image,user){
+ const token=process.env.DISCORD_BOT_TOKEN;
+ const channel=image.type==='avatar'?process.env.DISCORD_AVATARS_CHANNEL_ID:process.env.DISCORD_COVERS_CHANNEL_ID;
+ if(!token||!channel||!/^\d{16,22}$/.test(channel))throw Error('Armazenamento Discord não configurado');
+ const form=new FormData();form.append('payload_json',JSON.stringify({content:'Art em Foco | '+image.type+' | '+user.artId,allowed_mentions:{parse:[]}}));
+ form.append('files[0]',new Blob([image.buffer],{type:image.mime}),user.artId+'-'+Date.now()+'.'+image.extension);
+ const response=await fetch('https://discord.com/api/v10/channels/'+channel+'/messages',{method:'POST',headers:{Authorization:'Bot '+token},body:form,signal:AbortSignal.timeout(20000)});
+ const data=await response.json().catch(()=>({}));if(!response.ok||!data.id||!data.attachments?.[0]?.id)throw Error('Falha no envio ao Discord ('+response.status+')');
+ return {channelId:channel,messageId:data.id,attachmentId:data.attachments[0].id,mime:image.mime};
+}
+async function discordImageBytes(ref){
+ const token=process.env.DISCORD_BOT_TOKEN;
+ if(!token||!ref?.channelId||!ref?.messageId||!ref?.attachmentId)return null;
+ const response=await fetch('https://discord.com/api/v10/channels/'+ref.channelId+'/messages/'+ref.messageId,{headers:{Authorization:'Bot '+token},signal:AbortSignal.timeout(12000)});
+ if(!response.ok)return null;const data=await response.json();const attachment=data.attachments?.find(a=>a.id===ref.attachmentId);
+ if(!attachment?.url)return null;
+ const image=await fetch(attachment.url,{signal:AbortSignal.timeout(12000)});
+ if(!image.ok)return null;const bytes=Buffer.from(await image.arrayBuffer());if(bytes.length>6*1024*1024)return null;
+ return {bytes,mime:ref.mime||'image/png'};
+}
+
 async function sessionUser(req){const token=cookies(req).aef_session;if(!token||! /^[a-f0-9]{64}$/.test(token))return null;const db=await getDatabase();const session=await db.collection('sessions').findOne({_id:crypto.createHash('sha256').update(token).digest('hex'),expiresAt:{$gt:new Date()}});if(!session)return null;return db.collection('users').findOne({_id:session.userId})}
 async function ensureIndexes(db){await Promise.all([db.collection('users').createIndex({googleSub:1},{unique:true}),db.collection('users').createIndex({artId:1},{unique:true}),db.collection('users').createIndex({username:1},{unique:true,sparse:true}),db.collection('friendships').createIndex({pair:1},{unique:true}),db.collection('sessions').createIndex({expiresAt:1},{expireAfterSeconds:0})])}
 async function issueSession(db,user,res){const token=crypto.randomBytes(32).toString('hex');await db.collection('sessions').insertOne({_id:crypto.createHash('sha256').update(token).digest('hex'),userId:user._id,createdAt:new Date(),expiresAt:new Date(Date.now()+SESSION_MS)});return json(res,200,{user:safeUser(user)},{'Set-Cookie':cookie(token,SESSION_MS/1000)})}
@@ -37,6 +70,31 @@ if(pathname==='/api/auth/google'){
 }
 if(pathname==='/api/auth/me'){if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});try{const u=await sessionUser(req);return u?json(res,200,{user:safeUser(u)}):json(res,401,{error:'Sessão não encontrada'})}catch{return json(res,503,{error:'Banco de dados indisponível'})}}
 if(pathname==='/api/auth/logout'){if(req.method!=='POST')return json(res,405,{error:'Método não permitido'});try{const token=cookies(req).aef_session;if(token)await (await getDatabase()).collection('sessions').deleteOne({_id:crypto.createHash('sha256').update(token).digest('hex')});return json(res,200,{ok:true},{'Set-Cookie':cookie('',0)})}catch{return json(res,503,{error:'Não foi possível encerrar a sessão'})}}
+
+if(pathname==='/api/profile/image/upload'){
+ if(req.method!=='POST')return json(res,405,{error:'Método não permitido'});
+ try{
+  const user=await sessionUser(req);if(!user)return json(res,401,{error:'Faça login para enviar imagens'});
+  const image=await readImageUpload(req),ref=await discordImageUpload(image,user),db=await getDatabase();
+  const field=image.type==='avatar'?'avatar':'cover';
+  await db.collection('users').updateOne({_id:user._id},{$set:{[field+'Discord']:ref,[field]:'/api/profile/image/'+encodeURIComponent(user.artId)+'/'+field,updatedAt:new Date()}});
+  const updated=await db.collection('users').findOne({_id:user._id});
+  return json(res,200,{user:safeUser(updated)});
+ }catch(e){console.error('Falha no upload de imagem:',e.message);return json(res,/inválid|grande|Envie/.test(e.message)?400:503,{error:e.message||'Falha ao enviar imagem'})}
+}
+if(pathname.startsWith('/api/profile/image/')){
+ if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});
+ const match=/^\/api\/profile\/image\/(AEF-\d{8,})\/(avatar|cover)$/.exec(pathname);
+ if(!match)return json(res,404,{error:'Imagem não encontrada'});
+ try{
+  const db=await getDatabase(),user=await db.collection('users').findOne({artId:match[1]});
+  if(!user)return json(res,404,{error:'Imagem não encontrada'});
+  const ref=user[match[2]+'Discord'];const file=await discordImageBytes(ref);
+  if(!file)return json(res,404,{error:'Imagem indisponível'});
+  res.writeHead(200,{'Content-Type':file.mime,'Content-Length':file.bytes.length,'Cache-Control':'private, max-age=60','X-Content-Type-Options':'nosniff'});return res.end(file.bytes);
+ }catch{return json(res,503,{error:'Não foi possível carregar a imagem'})}
+}
+
 if(pathname==='/api/profile'){if(req.method!=='PATCH')return json(res,405,{error:'Método não permitido'});try{const user=await sessionUser(req);if(!user)return json(res,401,{error:'Faça login para editar seu perfil'});const data=await readJSON(req);if(typeof data.name!=='string'||typeof data.bio!=='string')return json(res,400,{error:'Dados inválidos'});const name=data.name.trim().slice(0,60),bio=data.bio.trim().slice(0,240),username=String(data.username||user.username||user.artId.toLowerCase()).trim().toLowerCase().replace(/^@/,'');if(!/^[a-z0-9_]{3,24}$/.test(username))return json(res,400,{error:'Usuário inválido: use 3 a 24 letras, números ou _'});const socials={};for(const [key,domain] of Object.entries({tiktok:'tiktok.com',youtube:'youtube.com',instagram:'instagram.com',facebook:'facebook.com'})){const raw=String(data.socials?.[key]||'').trim();if(raw){let url;try{url=new URL(raw)}catch{return json(res,400,{error:'Link inválido de '+key})}const host=url.hostname.toLowerCase();const allowed=key==='youtube'?['youtube.com','youtu.be']:key==='facebook'?['facebook.com','fb.com']: [domain];if(url.protocol!=='https:'||!allowed.some(d=>host===d||host.endsWith('.'+d))||raw.length>300)return json(res,400,{error:'Use um link HTTPS válido de '+key});socials[key]=url.href}}let avatar=user.avatar||'',cover=user.cover||'';for(const key of ['avatar','cover']){if(Object.prototype.hasOwnProperty.call(data,key)){const value=data[key];if(typeof value!=='string'||value.length>1000)return json(res,400,{error:'Link de imagem inválido'});const raw=value.trim();if(raw){let url;try{url=new URL(raw)}catch{return json(res,400,{error:'Link de imagem inválido'})}if(url.protocol!=='https:'||url.username||url.password||!url.hostname.includes('.')||url.hostname==='localhost')return json(res,400,{error:'Use uma URL pública HTTPS para a imagem'});if(key==='avatar')avatar=url.href;else cover=url.href}else if(key==='avatar')avatar='';else cover=''}}if(name.length<2)return json(res,400,{error:'O nome precisa de pelo menos 2 caracteres'});const db=await getDatabase();await db.collection('users').updateOne({_id:user._id},{$set:{displayName:name,bio,username,socials,avatar,cover,updatedAt:new Date()}});return json(res,200,{user:safeUser({...user,displayName:name,bio,username,socials,avatar,cover})})}catch(e){return json(res,e.code===11000?409:400,{error:e.code===11000?'Nome de usuário indisponível':'Não foi possível atualizar o perfil'})}}
 
 if(pathname==='/api/community/search'){
