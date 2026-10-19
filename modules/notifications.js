@@ -5,6 +5,18 @@ const body='Que bom ter você aqui!\n\nEste é um espaço para transformar suas 
 async function welcome(db,userId){
  await db.collection('notifications').updateOne({userId,type:'welcome'},{$setOnInsert:{userId,type:'welcome',title,body,createdAt:new Date(),readAt:null}},{upsert:true});
 }
+async function friendRequest(db,sender,recipient){
+ const now=new Date();
+ await db.collection('notifications').updateOne(
+  {userId:recipient._id,type:'friend-request:'+sender.artId},
+  {$set:{title:'👋 Novo pedido de amizade',body:'O artista '+(sender.displayName||sender.username||sender.artId)+' está pedindo sua amizade!',artistId:sender.artId,artistName:sender.displayName||sender.username||sender.artId,createdAt:now,readAt:null,status:'pending'},
+   $setOnInsert:{userId:recipient._id,type:'friend-request:'+sender.artId}},
+  {upsert:true}
+ );
+}
+async function friendResponse(db,recipientId,senderArtId,action){
+ await db.collection('notifications').updateOne({userId:recipientId,type:'friend-request:'+senderArtId},{$set:{status:action==='accept'?'accepted':'declined',readAt:new Date()}});
+}
 async function route(req,res,pathname,{sessionUser,getDatabase,json}){
  if(pathname!=='/api/notifications'&&!/^\/api\/notifications\/[0-9a-f]{24}\/read$/.test(pathname))return false;
  try{
@@ -14,7 +26,7 @@ async function route(req,res,pathname,{sessionUser,getDatabase,json}){
   if(pathname==='/api/notifications'){
    if(req.method!=='GET'){json(res,405,{error:'Método não permitido'});return true}
    const rows=await col.find({userId:user._id}).sort({createdAt:-1}).limit(100).toArray();
-   json(res,200,{notifications:rows.map(n=>({id:String(n._id),title:n.title,body:n.body,createdAt:n.createdAt,readAt:n.readAt||null}))});return true;
+   json(res,200,{notifications:rows.map(n=>({id:String(n._id),title:n.title,body:n.body,artistId:n.artistId||null,artistName:n.artistName||null,status:n.status||null,createdAt:n.createdAt,readAt:n.readAt||null}))});return true;
   }
   if(req.method!=='PATCH'){json(res,405,{error:'Método não permitido'});return true}
   const id=new ObjectId(pathname.split('/')[3]);
@@ -23,4 +35,4 @@ async function route(req,res,pathname,{sessionUser,getDatabase,json}){
   json(res,200,{ok:true});return true;
  }catch(e){console.error('Erro em notificações:',e.message);json(res,503,{error:'Não foi possível carregar as notificações'});return true}
 }
-module.exports={welcome,route};
+module.exports={welcome,friendRequest,friendResponse,route};
