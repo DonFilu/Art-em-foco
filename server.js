@@ -180,6 +180,20 @@ if(pathname==='/api/art/publish'){
   return json(res,201,{ok:true,id:result.insertedId.toString()});
  }catch(e){console.error('Falha ao publicar arte:',e.message);return json(res,/inválid|grande|limite/i.test(e.message)?400:503,{error:e.message||'Falha ao publicar'})}
 }
+if(pathname==='/api/art/feed'){
+ if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});
+ try{
+  const user=await sessionUser(req),db=await getDatabase(),params=new URL(req.url,'http://localhost').searchParams;
+  const filter=params.get('filter')==='friends'?'friends':'all';
+  const relations=user?await db.collection('friendships').find({members:user.artId,status:'accepted'}).limit(500).toArray():[];
+  const friendIds=relations.map(r=>r.members.find(id=>id!==user.artId));
+  const query=filter==='friends'?{authorId:{$in:friendIds}}:{$or:[{visibility:'public'},...(user?[{authorId:{$in:[...friendIds,user.artId]},visibility:'friends'},{authorId:user.artId}]:[])]};
+  const posts=await db.collection('art_posts').find(query).sort({createdAt:-1}).limit(60).toArray();
+  const users=await db.collection('users').find({artId:{$in:[...new Set(posts.map(p=>p.authorId))]}}).toArray();
+  const artists=new Map(users.map(u=>[u.artId,publicUser(u)]));
+  return json(res,200,{posts:posts.map(p=>({id:p._id.toString(),authorId:p.authorId,artist:artists.get(p.authorId)||null,description:p.description,visibility:p.visibility,createdAt:p.createdAt,image:'/api/art/media/'+p._id.toString()}))});
+ }catch(e){console.error('Falha ao carregar feed:',e.message);return json(res,503,{error:'Não foi possível carregar o feed'})}
+}
 if(pathname==='/api/art/posts'){
  if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});
  try{
