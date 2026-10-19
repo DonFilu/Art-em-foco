@@ -180,6 +180,24 @@ if(pathname==='/api/art/publish'){
   return json(res,201,{ok:true,id:result.insertedId.toString()});
  }catch(e){console.error('Falha ao publicar arte:',e.message);return json(res,/inválid|grande|limite/i.test(e.message)?400:503,{error:e.message||'Falha ao publicar'})}
 }
+if(pathname.startsWith('/api/art/posts/')&&req.method==='DELETE'){
+ const id=pathname.slice('/api/art/posts/'.length);
+ if(!/^[a-f0-9]{24}$/.test(id))return json(res,400,{error:'Publicação inválida'});
+ try{
+  const user=await sessionUser(req);if(!user)return json(res,401,{error:'Entre na sua conta para excluir publicações'});
+  const db=await getDatabase(),collection=db.collection('art_posts');
+  const post=await collection.findOne({_id:new ObjectId(id)});
+  if(!post)return json(res,404,{error:'Publicação não encontrada'});
+  if(post.authorId!==user.artId)return json(res,403,{error:'Somente o criador pode excluir esta publicação'});
+  if(!post.fileId)return json(res,409,{error:'Arquivo da publicação sem identificação no ImageKit. Exclusão interrompida para evitar inconsistências.'});
+  const key=process.env.IMAGEKIT_PRIVATE_KEY;if(!key)return json(res,503,{error:'ImageKit não configurado'});
+  const response=await fetch('https://api.imagekit.io/v1/files/'+encodeURIComponent(post.fileId),{method:'DELETE',headers:{Authorization:'Basic '+Buffer.from(key+':').toString('base64')},signal:AbortSignal.timeout(20000)});
+  if(!response.ok&&response.status!==404){console.error('Falha ao excluir arquivo no ImageKit:',response.status);return json(res,502,{error:'Não foi possível excluir a imagem no ImageKit. A publicação foi mantida.'})}
+  const result=await collection.deleteOne({_id:post._id,authorId:user.artId});
+  if(!result.deletedCount)return json(res,503,{error:'Imagem removida, mas não foi possível remover o registro. Tente novamente.'});
+  return json(res,200,{ok:true});
+ }catch(e){console.error('Falha ao excluir publicação:',e.message);return json(res,503,{error:'Falha ao excluir publicação. Tente novamente.'})}
+}
 if(pathname==='/api/art/feed'){
  if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});
  try{
