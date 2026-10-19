@@ -12,7 +12,7 @@ async function readJSON(req){let data='';for await(const chunk of req){data+=chu
 function cookies(req){return Object.fromEntries((req.headers.cookie||'').split(';').map(s=>s.trim().split('=').map(decodeURIComponent)).filter(a=>a.length===2))}
 function cookie(token,maxAge){return 'aef_session='+encodeURIComponent(token||'')+'; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age='+maxAge}
 function safeUser(u){return {id:u.artId,name:u.displayName,picture:u.picture||'',email:u.email||'',username:u.username||u.artId.toLowerCase(),bio:u.bio||'',createdAt:u.createdAt,role:u.role||'artist',socials:u.socials||{},avatar:u.avatar||'',cover:u.cover||''}}
-function publicUser(u){return {id:u.artId,username:u.username||u.artId.toLowerCase(),name:u.displayName,bio:u.bio||'',avatar:u.avatar||'',socials:u.socials||{}}}
+function publicUser(u){return {id:u.artId,username:u.username||u.artId.toLowerCase(),name:u.displayName,bio:u.bio||'',avatar:u.avatar||'',cover:u.cover||'',socials:u.socials||{}}}
 
 async function readImageUpload(req){
  let chunks=[],size=0;for await(const chunk of req){size+=chunk.length;if(size>7*1024*1024)throw Error('Imagem muito grande (máximo 5 MB)');chunks.push(chunk)}
