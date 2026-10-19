@@ -240,6 +240,8 @@ if(pathname.startsWith('/api/art/media/')){
 
 if(pathname==='/api/database/status'){if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});try{await checkDatabase();return json(res,200,{connected:true})}catch{return json(res,503,{connected:false})}}
 if(pathname==='/')pathname='/index.html';
+if(pathname==='/politica-de-privacidade'||pathname==='/política-de-privacidade')pathname='/politica-de-privacidade.html';
+if(pathname==='/termos-de-uso')pathname='/termos-de-uso.html';
 if(['/db.js','/server.js','/package.json','/package-lock.json'].includes(pathname)||pathname.startsWith('/.')){res.writeHead(404);return res.end('Não encontrado')}
 const file=path.resolve(root,'.'+pathname);if(file!==root&&!file.startsWith(root+path.sep)){res.writeHead(403);return res.end('Acesso negado')}
 fs.readFile(file,(err,data)=>{if(err){res.writeHead(err.code==='ENOENT'?404:500);return res.end('Arquivo indisponível')}res.writeHead(200,{'Content-Type':mime[path.extname(file)]||'application/octet-stream','X-Content-Type-Options':'nosniff'});res.end(data)})
