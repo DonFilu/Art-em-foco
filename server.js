@@ -239,6 +239,7 @@ if(pathname.startsWith('/api/art/posts/')&&req.method==='DELETE'){
   const key=process.env.IMAGEKIT_PRIVATE_KEY;if(!key)return json(res,503,{error:'ImageKit não configurado'});
   const response=await fetch('https://api.imagekit.io/v1/files/'+encodeURIComponent(post.fileId),{method:'DELETE',headers:{Authorization:'Basic '+Buffer.from(key+':').toString('base64')},signal:AbortSignal.timeout(20000)});
   if(!response.ok&&response.status!==404){console.error('Falha ao excluir arquivo no ImageKit:',response.status);return json(res,502,{error:'Não foi possível excluir a imagem no ImageKit. A publicação foi mantida.'})}
+  try{const likesReceived=await db.collection('post_likes').countDocuments({postId:post._id});await db.collection('deleted_post_likes').updateOne({_id:post._id},{$setOnInsert:{authorId:post.authorId,likesReceived,deletedAt:new Date()}},{upsert:true})}catch(e){console.error('Falha ao preservar histórico de curtidas:',e.message);return json(res,503,{error:'Imagem removida, mas o histórico de curtidas não pôde ser salvo. Tente excluir novamente.'})}
   try{await interactions.cleanupPost(db,post._id)}catch(e){console.error('Falha ao limpar interações da publicação:',e.message);return json(res,503,{error:'Imagem removida, mas as interações ainda não puderam ser limpas. Tente excluir novamente.'})}
   const result=await collection.deleteOne({_id:post._id,authorId:user.artId});
   if(!result.deletedCount)return json(res,503,{error:'Imagem e interações removidas, mas não foi possível remover o registro. Tente novamente.'});
