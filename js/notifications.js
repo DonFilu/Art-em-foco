@@ -1,0 +1,1 @@
+(()=>{'use strict';const list=document.getElementById('notificationsList');if(!list)return;/* Módulo independente: futuramente renderizará notificações reais aqui. */})();
