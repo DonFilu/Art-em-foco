@@ -10,6 +10,7 @@ const SESSION_MS=30*24*60*60*1000;
 
 const {ObjectId}=require('mongodb');
 const notifications=require('./modules/notifications');
+const interactions=require('./modules/interactions');
 const ART_MAX=5*1024*1024;
 async function readArt(req){
  const chunks=[];let size=0;for await(const part of req){size+=part.length;if(size>7*1024*1024)throw Error('Arquivo muito grande');chunks.push(part)}
@@ -55,6 +56,11 @@ function cookies(req){return Object.fromEntries((req.headers.cookie||'').split('
 function cookie(token,maxAge){return 'aef_session='+encodeURIComponent(token||'')+'; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age='+maxAge}
 function safeUser(u){return {id:u.artId,name:u.displayName,picture:u.picture||'',email:u.email||'',username:u.username||u.artId.toLowerCase(),bio:u.bio||'',createdAt:u.createdAt,role:u.role||'artist',socials:u.socials||{},avatar:u.avatar||'',cover:u.cover||''}}
 function publicUser(u){return {id:u.artId,username:u.username||u.artId.toLowerCase(),name:u.displayName,bio:u.bio||'',avatar:u.avatar||'',cover:u.cover||'',socials:u.socials||{}}}
+async function postViews(db,posts,user,artists=new Map()){
+ const ids=posts.map(post=>post._id);let liked=new Set();
+ if(user&&ids.length){const rows=await db.collection('post_likes').find({userId:user._id,postId:{$in:ids}},{projection:{postId:1}}).toArray();liked=new Set(rows.map(row=>String(row.postId)))}
+ return posts.map(post=>({id:post._id.toString(),authorId:post.authorId,artist:artists.get(post.authorId)||null,description:post.description,visibility:post.visibility,createdAt:post.createdAt,image:'/api/art/media/'+post._id.toString(),likeCount:post.likeCount||0,commentCount:post.commentCount||0,likedByViewer:liked.has(String(post._id))}));
+}
 
 async function readImageUpload(req){
  let chunks=[],size=0;for await(const chunk of req){size+=chunk.length;if(size>7*1024*1024)throw Error('Imagem muito grande (máximo 5 MB)');chunks.push(chunk)}
@@ -89,7 +95,7 @@ async function discordImageBytes(ref){
 }
 
 async function sessionUser(req){const token=cookies(req).aef_session;if(!token||! /^[a-f0-9]{64}$/.test(token))return null;const db=await getDatabase();const session=await db.collection('sessions').findOne({_id:crypto.createHash('sha256').update(token).digest('hex'),expiresAt:{$gt:new Date()}});if(!session)return null;return db.collection('users').findOne({_id:session.userId})}
-async function ensureIndexes(db){await Promise.all([db.collection('users').createIndex({googleSub:1},{unique:true}),db.collection('users').createIndex({artId:1},{unique:true}),db.collection('users').createIndex({username:1},{unique:true,sparse:true}),db.collection('friendships').createIndex({pair:1},{unique:true}),db.collection('sessions').createIndex({expiresAt:1},{expireAfterSeconds:0}),db.collection('notifications').createIndex({userId:1,type:1},{unique:true})])}
+async function ensureIndexes(db){await Promise.all([db.collection('users').createIndex({googleSub:1},{unique:true}),db.collection('users').createIndex({artId:1},{unique:true}),db.collection('users').createIndex({username:1},{unique:true,sparse:true}),db.collection('friendships').createIndex({pair:1},{unique:true}),db.collection('sessions').createIndex({expiresAt:1},{expireAfterSeconds:0}),db.collection('notifications').createIndex({userId:1,type:1},{unique:true}),db.collection('post_likes').createIndex({postId:1,userId:1},{unique:true}),db.collection('post_likes').createIndex({userId:1,postId:1}),db.collection('art_comments').createIndex({postId:1,parentId:1,_id:-1}),db.collection('comment_likes').createIndex({commentId:1,userId:1},{unique:true}),db.collection('comment_likes').createIndex({userId:1,commentId:1})])}
 async function issueSession(db,user,res){const token=crypto.randomBytes(32).toString('hex');await db.collection('sessions').insertOne({_id:crypto.createHash('sha256').update(token).digest('hex'),userId:user._id,createdAt:new Date(),expiresAt:new Date(Date.now()+SESSION_MS)});return json(res,200,{user:safeUser(user)},{'Set-Cookie':cookie(token,SESSION_MS/1000)})}
 http.createServer(async(req,res)=>{
 let pathname;try{pathname=decodeURIComponent(new URL(req.url,'http://localhost').pathname)}catch{return json(res,400,{error:'Requisição inválida'})}
@@ -112,6 +118,7 @@ if(pathname==='/api/auth/google'){
  }catch(e){console.error('Falha ao persistir login:',e.message);return json(res,503,{error:'Não foi possível salvar a conta no banco de dados'})}
 }
 if(await notifications.route(req,res,pathname,{sessionUser,getDatabase,json}))return;
+if(await interactions.route(req,res,pathname,{sessionUser,getDatabase,json,canViewArt,notifications,ensureIndexes}))return;
 if(pathname==='/api/auth/me'){if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});try{const u=await sessionUser(req);return u?json(res,200,{user:safeUser(u)}):json(res,401,{error:'Sessão não encontrada'})}catch{return json(res,503,{error:'Banco de dados indisponível'})}}
 if(pathname==='/api/auth/logout'){if(req.method!=='POST')return json(res,405,{error:'Método não permitido'});try{const token=cookies(req).aef_session;if(token)await (await getDatabase()).collection('sessions').deleteOne({_id:crypto.createHash('sha256').update(token).digest('hex')});return json(res,200,{ok:true},{'Set-Cookie':cookie('',0)})}catch{return json(res,503,{error:'Não foi possível encerrar a sessão'})}}
 
@@ -212,7 +219,7 @@ if(pathname==='/api/art/publish'){
   const recent=await db.collection('art_posts').countDocuments({authorId:user.artId,createdAt:{$gte:new Date(Date.now()-3600000)}});
   if(recent>=10)return json(res,429,{error:'Limite de 10 publicações por hora'});
   const art=await readArt(req),uploaded=await uploadPrivateArt(art,user);
-  const result=await db.collection('art_posts').insertOne({authorId:user.artId,description:art.description,visibility:art.visibility,mime:art.mime,fileId:uploaded.fileId,fileURL:uploaded.url,createdAt:new Date()});
+  const result=await db.collection('art_posts').insertOne({authorId:user.artId,description:art.description,visibility:art.visibility,mime:art.mime,fileId:uploaded.fileId,fileURL:uploaded.url,likeCount:0,commentCount:0,createdAt:new Date()});
   return json(res,201,{ok:true,id:result.insertedId.toString()});
  }catch(e){console.error('Falha ao publicar arte:',e.message);return json(res,/inválid|grande|limite/i.test(e.message)?400:503,{error:e.message||'Falha ao publicar'})}
 }
@@ -229,8 +236,9 @@ if(pathname.startsWith('/api/art/posts/')&&req.method==='DELETE'){
   const key=process.env.IMAGEKIT_PRIVATE_KEY;if(!key)return json(res,503,{error:'ImageKit não configurado'});
   const response=await fetch('https://api.imagekit.io/v1/files/'+encodeURIComponent(post.fileId),{method:'DELETE',headers:{Authorization:'Basic '+Buffer.from(key+':').toString('base64')},signal:AbortSignal.timeout(20000)});
   if(!response.ok&&response.status!==404){console.error('Falha ao excluir arquivo no ImageKit:',response.status);return json(res,502,{error:'Não foi possível excluir a imagem no ImageKit. A publicação foi mantida.'})}
+  try{await interactions.cleanupPost(db,post._id)}catch(e){console.error('Falha ao limpar interações da publicação:',e.message);return json(res,503,{error:'Imagem removida, mas as interações ainda não puderam ser limpas. Tente excluir novamente.'})}
   const result=await collection.deleteOne({_id:post._id,authorId:user.artId});
-  if(!result.deletedCount)return json(res,503,{error:'Imagem removida, mas não foi possível remover o registro. Tente novamente.'});
+  if(!result.deletedCount)return json(res,503,{error:'Imagem e interações removidas, mas não foi possível remover o registro. Tente novamente.'});
   return json(res,200,{ok:true});
  }catch(e){console.error('Falha ao excluir publicação:',e.message);return json(res,503,{error:'Falha ao excluir publicação. Tente novamente.'})}
 }
@@ -245,7 +253,7 @@ if(pathname==='/api/art/feed'){
   const posts=await db.collection('art_posts').find(query).sort({createdAt:-1}).limit(60).toArray();
   const users=await db.collection('users').find({artId:{$in:[...new Set(posts.map(p=>p.authorId))]}}).toArray();
   const artists=new Map(users.map(u=>[u.artId,publicUser(u)]));
-  return json(res,200,{posts:posts.map(p=>({id:p._id.toString(),authorId:p.authorId,artist:artists.get(p.authorId)||null,description:p.description,visibility:p.visibility,createdAt:p.createdAt,image:'/api/art/media/'+p._id.toString()}))});
+  return json(res,200,{posts:await postViews(db,posts,user,artists)});
  }catch(e){console.error('Falha ao carregar feed:',e.message);return json(res,503,{error:'Não foi possível carregar o feed'})}
 }
 if(pathname==='/api/art/posts'){
@@ -255,8 +263,8 @@ if(pathname==='/api/art/posts'){
   const author=params.get('author')||user?.artId||'';
   if(!/^AEF-\d{8,}$/.test(author))return json(res,400,{error:'Artista inválido'});
   const posts=await db.collection('art_posts').find({authorId:author}).sort({createdAt:-1}).limit(50).toArray();
-  const allowed=[];for(const post of posts){if(await canViewArt(db,post,user))allowed.push({id:post._id.toString(),authorId:post.authorId,description:post.description,visibility:post.visibility,createdAt:post.createdAt,image:'/api/art/media/'+post._id.toString()})}
-  return json(res,200,{posts:allowed});
+  const allowed=[];for(const post of posts){if(await canViewArt(db,post,user))allowed.push(post)}
+  return json(res,200,{posts:await postViews(db,allowed,user)});
  }catch{return json(res,503,{error:'Não foi possível carregar publicações'})}
 }
 if(pathname.startsWith('/api/art/media/')){

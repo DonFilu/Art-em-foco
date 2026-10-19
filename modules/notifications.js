@@ -26,6 +26,17 @@ async function friendAccepted(db,requester,acceptingArtist){
   {upsert:true}
  );
 }
+async function interaction(db,{recipient,actor,kind,postId,postAuthorId,commentId=null}){
+ if(!recipient||String(recipient._id)===String(actor._id))return;
+ const name=actor.displayName||actor.username||actor.artId;
+ const labels={postLike:'curtiu sua arte',comment:'comentou na sua arte',reply:'respondeu ao seu comentário',commentLike:'curtiu seu comentário'};
+ const type='interaction:'+kind+':'+postId+':'+(commentId||'post')+':'+actor.artId;
+ await db.collection('notifications').updateOne(
+  {userId:recipient._id,type},
+  {$set:{title:'💬 Nova interação',body:name+' '+(labels[kind]||'interagiu com sua arte')+'.',artistId:actor.artId,artistName:name,link:'/artista.html?id='+encodeURIComponent(postAuthorId)+'#post-'+postId,createdAt:new Date(),readAt:null},$setOnInsert:{userId:recipient._id,type}},
+  {upsert:true}
+ );
+}
 async function route(req,res,pathname,{sessionUser,getDatabase,json}){
  if(pathname!=='/api/notifications'&&!/^\/api\/notifications\/[0-9a-f]{24}\/read$/.test(pathname))return false;
  try{
@@ -35,7 +46,7 @@ async function route(req,res,pathname,{sessionUser,getDatabase,json}){
   if(pathname==='/api/notifications'){
    if(req.method!=='GET'){json(res,405,{error:'Método não permitido'});return true}
    const rows=await col.find({userId:user._id}).sort({createdAt:-1}).limit(100).toArray();
-   json(res,200,{viewerId:user.artId,soundEnabled:user.notificationSettings?.soundEnabled!==false,notifications:rows.map(n=>({id:String(n._id),title:n.title,body:n.body,artistId:n.artistId||null,artistName:n.artistName||null,status:n.status||null,createdAt:n.createdAt,readAt:n.readAt||null}))});return true;
+   json(res,200,{viewerId:user.artId,soundEnabled:user.notificationSettings?.soundEnabled!==false,notifications:rows.map(n=>({id:String(n._id),title:n.title,body:n.body,artistId:n.artistId||null,artistName:n.artistName||null,status:n.status||null,link:n.link||null,createdAt:n.createdAt,readAt:n.readAt||null}))});return true;
   }
   if(req.method!=='PATCH'){json(res,405,{error:'Método não permitido'});return true}
   const id=new ObjectId(pathname.split('/')[3]);
@@ -44,4 +55,4 @@ async function route(req,res,pathname,{sessionUser,getDatabase,json}){
   json(res,200,{ok:true});return true;
  }catch(e){console.error('Erro em notificações:',e.message);json(res,503,{error:'Não foi possível carregar as notificações'});return true}
 }
-module.exports={welcome,friendRequest,friendResponse,friendAccepted,route};
+module.exports={welcome,friendRequest,friendResponse,friendAccepted,interaction,route};
