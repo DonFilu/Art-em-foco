@@ -1,5 +1,6 @@
 (()=>{'use strict';
  const center=window.ArtEmFocoNotifications;if(!center)return;
+ if(location.pathname==='/artista.html'&&!window.ArtEmFocoInteractions&&!document.querySelector('script[data-aef-interactions]')){const script=document.createElement('script');script.src='/js/art-interactions.js';script.dataset.aefInteractions='1';document.head.append(script)}
  const root=document.createElement('section');root.className='aef-toast-region';root.setAttribute('aria-label','Notificações recentes');root.setAttribute('aria-live','polite');
  const list=document.createElement('div');list.className='aef-toast-list';const more=document.createElement('button');more.type='button';more.className='aef-toast-more';more.hidden=true;more.addEventListener('click',()=>{location.href='/notificacoes.html'});root.append(list,more);document.body.append(root);
  const audio=new Audio('/audio/notificacao.mp3');audio.preload='auto';
