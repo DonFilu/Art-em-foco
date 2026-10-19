@@ -31,3 +31,12 @@ button{border-radius:9px;background:#333d4a;border-color:#4a5665;transition:back
 .aef-brush-option span{font-size:11px;line-height:1.2;text-align:center}
 .aef-brush-option.selected{border-color:#ffc28a;box-shadow:inset 0 0 0 1px #ffc28a;background:#3b3440}
 .aef-brush-option:hover{transform:translateY(-1px)}
+
+/* Painel compacto e expansivel dos estilos de pincel. */
+.aef-brush-accordion{border:1px solid #45475b;border-radius:12px;background:#242633;overflow:hidden}
+.aef-brush-accordion>summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px;cursor:pointer;user-select:none;font-size:13px;font-weight:600}
+.aef-brush-accordion>summary::-webkit-details-marker{display:none}
+.aef-brush-accordion>summary small{display:block;font-size:11px;font-weight:400;opacity:.7;margin-top:3px}
+.aef-brush-chevron{font-size:20px;transition:transform .2s}
+.aef-brush-accordion[open] .aef-brush-chevron{transform:rotate(180deg)}
+.aef-brush-accordion .aef-brush-gallery{padding:0 9px 10px;margin-top:0}
