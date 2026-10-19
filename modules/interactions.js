@@ -1,5 +1,6 @@
 'use strict';
 const {ObjectId}=require('mongodb');
+const {avatarInfo}=require('./avatars');
 const MESSAGE_MAX=2000, PAGE_SIZE=20;
 const recentComments=new Map();
 let indexesReady;
@@ -8,7 +9,7 @@ const asId=id=>new ObjectId(id);
 function limit(value){return Math.max(1,Math.min(PAGE_SIZE,Number(value)||PAGE_SIZE))}
 function text(value){if(typeof value!=='string')throw Error('Comentário inválido');const clean=value.trim();if(!clean||clean.length>MESSAGE_MAX)throw Error('Escreva uma mensagem de 1 a 2000 caracteres');return clean}
 async function postFor(db,id,user,canViewArt){if(!validId(id))return null;const post=await db.collection('art_posts').findOne({_id:asId(id)});if(!post||!await canViewArt(db,post,user))return null;return post}
-async function authorMap(db,rows){const ids=[...new Set(rows.map(row=>row.authorId))];const users=ids.length?await db.collection('users').find({artId:{$in:ids}},{projection:{artId:1,displayName:1,username:1,avatar:1}}).toArray():[];return new Map(users.map(u=>[u.artId,{id:u.artId,name:u.displayName||u.username||u.artId,username:u.username||u.artId.toLowerCase(),avatar:u.avatar||''}]))}
+async function authorMap(db,rows){const ids=[...new Set(rows.map(row=>row.authorId))];const users=ids.length?await db.collection('users').find({artId:{$in:ids}},{projection:{artId:1,displayName:1,username:1,avatar:1,picture:1,avatarDiscord:1,avatarUpdatedAt:1}}).toArray():[];return new Map(users.map(u=>[u.artId,{id:u.artId,name:u.displayName||u.username||u.artId,username:u.username||u.artId.toLowerCase(),...avatarInfo(u)}]))}
 async function serializeComments(db,rows,user){const authors=await authorMap(db,rows);let liked=new Set();if(user&&rows.length){const likes=await db.collection('comment_likes').find({userId:user._id,commentId:{$in:rows.map(r=>r._id)}},{projection:{commentId:1}}).toArray();liked=new Set(likes.map(l=>String(l.commentId)))}return rows.map(row=>({id:String(row._id),postId:String(row.postId),parentId:row.parentId?String(row.parentId):null,replyToId:row.replyToId?String(row.replyToId):null,replyToName:row.replyToName||null,text:row.text,createdAt:row.createdAt,likesCount:row.likesCount||0,repliesCount:row.repliesCount||0,likedByViewer:liked.has(String(row._id)),author:authors.get(row.authorId)||{id:row.authorId,name:row.authorId,username:row.authorId.toLowerCase(),avatar:''}}))}
 function cursorQuery(cursor){return validId(cursor)?{_id:{$lt:asId(cursor)}}:{}}
 async function listComments(db,post,user,params,parentId=null){const query={postId:post._id,parentId,...cursorQuery(params.get('cursor'))};const rows=await db.collection('art_comments').find(query,{projection:{postId:1,parentId:1,replyToId:1,replyToName:1,authorId:1,text:1,createdAt:1,likesCount:1,repliesCount:1}}).sort({_id:-1}).limit(limit(params.get('limit'))+1).toArray();const more=rows.length>limit(params.get('limit'));if(more)rows.pop();return {comments:await serializeComments(db,rows,user),nextCursor:more?String(rows.at(-1)._id):null}}
