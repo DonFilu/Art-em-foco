@@ -23,9 +23,27 @@
    const response=await fetch(endpoint,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
    const result=await response.json();if(!response.ok)throw Error(result.error||'Não foi possível atualizar a amizade');
    friendship=body.action==='remove'?null:body.action==='accept'?{status:'accepted',direction:'received'}:{status:'pending',direction:'sent'};
-   renderFriend();feedback.textContent=body.action==='remove'?'Amizade desfeita.':body.action==='accept'?'Pedido aceito!':'Pedido enviado!';
+   renderFriend();if(body.action==='remove'){friendCount=Math.max(0,friendCount-1);showCount();allowList(false)}else if(body.action==='accept'){friendCount++;showCount();allowList(true)}feedback.textContent=body.action==='remove'?'Amizade desfeita.':body.action==='accept'?'Pedido aceito!':'Pedido enviado!';
   }catch(e){feedback.textContent=e.message;button.disabled=false}
  };
  renderFriend();
 }
+const count=$('friendCount'),view=$('viewArtistFriends'),friendList=$('artistFriendsList');
+let friendCount=Number(data.friendsCount)||0;
+function showCount(){count.textContent='👥 '+friendCount+' '+(friendCount===1?'amigo':'amigos')}
+function allowList(allowed){view.hidden=!allowed;if(!allowed){friendList.hidden=true;view.textContent='Ver amigos →'}}
+showCount();allowList(Boolean(data.canViewFriends));
+view.onclick=async()=>{
+ if(!friendList.hidden){friendList.hidden=true;view.textContent='Ver amigos →';return}
+ view.disabled=true;friendList.hidden=false;friendList.textContent='Carregando amigos...';
+ try{
+  const response=await fetch('/api/community/profile/friends?id='+encodeURIComponent(a.id),{credentials:'same-origin',cache:'no-store'});
+  const data=await response.json();if(!response.ok)throw Error(data.error||'Não foi possível carregar amigos');
+  friendList.replaceChildren();
+  if(!data.friends?.length){friendList.textContent='Este artista ainda não tem amigos.'}
+  else for(const friend of data.friends){const link=document.createElement('a');link.href='/artista.html?id='+encodeURIComponent(friend.id);link.textContent=(friend.name||friend.username||friend.id)+' (@'+friend.username+')';friendList.append(link)}
+  view.textContent='Ocultar amigos ↑';
+ }catch(e){friendList.textContent=e.message}
+ finally{view.disabled=false}
+};
 loadPosts(a.id)}catch(e){$('loading').textContent=e.message||'Erro ao carregar perfil'}}load()})();
