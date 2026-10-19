@@ -4,3 +4,8 @@
 
 .art-delete-button{display:block;margin-top:12px;padding:9px 12px;border:1px solid #7e4648;border-radius:9px;background:#392428;color:#ffc0c0;font-size:12px;font-weight:750;cursor:pointer}.art-delete-button:hover{background:#533036}.art-delete-button:disabled{opacity:.6;cursor:wait}
  .post-avatar{overflow:hidden}.post-avatar img{width:100%;height:100%;object-fit:cover}
+
+/* Stories: remove o fundo escuro interno e evita corte dos avatares no celular. */
+.stories-row{background:transparent;min-width:0;padding:4px 0;overflow-x:auto;overflow-y:hidden}
+.stories-row>.story-person{flex:0 0 auto;min-width:76px;background:transparent}
+@media(max-width:760px){.stories-row>.story-person{min-width:68px}}
