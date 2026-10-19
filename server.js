@@ -9,6 +9,7 @@ const mime={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8',
 const SESSION_MS=30*24*60*60*1000;
 
 const {ObjectId}=require('mongodb');
+const notifications=require('./modules/notifications');
 const ART_MAX=5*1024*1024;
 async function readArt(req){
  const chunks=[];let size=0;for await(const part of req){size+=part.length;if(size>7*1024*1024)throw Error('Arquivo muito grande');chunks.push(part)}
@@ -88,7 +89,7 @@ async function discordImageBytes(ref){
 }
 
 async function sessionUser(req){const token=cookies(req).aef_session;if(!token||! /^[a-f0-9]{64}$/.test(token))return null;const db=await getDatabase();const session=await db.collection('sessions').findOne({_id:crypto.createHash('sha256').update(token).digest('hex'),expiresAt:{$gt:new Date()}});if(!session)return null;return db.collection('users').findOne({_id:session.userId})}
-async function ensureIndexes(db){await Promise.all([db.collection('users').createIndex({googleSub:1},{unique:true}),db.collection('users').createIndex({artId:1},{unique:true}),db.collection('users').createIndex({username:1},{unique:true,sparse:true}),db.collection('friendships').createIndex({pair:1},{unique:true}),db.collection('sessions').createIndex({expiresAt:1},{expireAfterSeconds:0})])}
+async function ensureIndexes(db){await Promise.all([db.collection('users').createIndex({googleSub:1},{unique:true}),db.collection('users').createIndex({artId:1},{unique:true}),db.collection('users').createIndex({username:1},{unique:true,sparse:true}),db.collection('friendships').createIndex({pair:1},{unique:true}),db.collection('sessions').createIndex({expiresAt:1},{expireAfterSeconds:0}),db.collection('notifications').createIndex({userId:1,type:1},{unique:true})])}
 async function issueSession(db,user,res){const token=crypto.randomBytes(32).toString('hex');await db.collection('sessions').insertOne({_id:crypto.createHash('sha256').update(token).digest('hex'),userId:user._id,createdAt:new Date(),expiresAt:new Date(Date.now()+SESSION_MS)});return json(res,200,{user:safeUser(user)},{'Set-Cookie':cookie(token,SESSION_MS/1000)})}
 http.createServer(async(req,res)=>{
 let pathname;try{pathname=decodeURIComponent(new URL(req.url,'http://localhost').pathname)}catch{return json(res,400,{error:'Requisição inválida'})}
@@ -105,10 +106,12 @@ if(pathname==='/api/auth/google'){
    const artId='AEF-'+String(seq.value).padStart(8,'0');
    try{await users.insertOne({googleSub:payload.sub,artId,username:artId.toLowerCase(),displayName:(payload.name||'Artista').slice(0,60),email:payload.email||'',picture:payload.picture||'',bio:'',role:'artist',createdAt:now,updatedAt:now,lastLoginAt:now});}catch(e){if(e.code!==11000)throw e}
    user=await users.findOne({googleSub:payload.sub});
+   if(user)await notifications.welcome(db,user._id);
  }else{await users.updateOne({_id:user._id},{$set:{email:payload.email||'',picture:payload.picture||'',lastLoginAt:now}});user=await users.findOne({_id:user._id})}
  return issueSession(db,user,res)
  }catch(e){console.error('Falha ao persistir login:',e.message);return json(res,503,{error:'Não foi possível salvar a conta no banco de dados'})}
 }
+if(await notifications.route(req,res,pathname,{sessionUser,getDatabase,json}))return;
 if(pathname==='/api/auth/me'){if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});try{const u=await sessionUser(req);return u?json(res,200,{user:safeUser(u)}):json(res,401,{error:'Sessão não encontrada'})}catch{return json(res,503,{error:'Banco de dados indisponível'})}}
 if(pathname==='/api/auth/logout'){if(req.method!=='POST')return json(res,405,{error:'Método não permitido'});try{const token=cookies(req).aef_session;if(token)await (await getDatabase()).collection('sessions').deleteOne({_id:crypto.createHash('sha256').update(token).digest('hex')});return json(res,200,{ok:true},{'Set-Cookie':cookie('',0)})}catch{return json(res,503,{error:'Não foi possível encerrar a sessão'})}}
 
