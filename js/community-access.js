@@ -1,0 +1,1 @@
+(()=>{'use strict';async function verify(){try{const response=await fetch('/api/auth/me',{credentials:'same-origin',cache:'no-store'});if(response.ok){const data=await response.json();if(data.user)return}}catch{}location.replace('/?login=required')}verify()})();
