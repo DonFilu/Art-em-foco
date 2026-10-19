@@ -17,6 +17,15 @@ async function friendRequest(db,sender,recipient){
 async function friendResponse(db,recipientId,senderArtId,action){
  await db.collection('notifications').updateOne({userId:recipientId,type:'friend-request:'+senderArtId},{$set:{status:action==='accept'?'accepted':'declined',readAt:new Date()}});
 }
+async function friendAccepted(db,requester,acceptingArtist){
+ const name=acceptingArtist.displayName||acceptingArtist.username||acceptingArtist.artId;
+ await db.collection('notifications').updateOne(
+  {userId:requester._id,type:'friend-accepted:'+acceptingArtist.artId},
+  {$set:{title:'💜 Pedido de amizade aceito!',body:'Seu pedido de amizade com '+name+' foi aceito!',createdAt:new Date(),readAt:null},
+   $setOnInsert:{userId:requester._id,type:'friend-accepted:'+acceptingArtist.artId}},
+  {upsert:true}
+ );
+}
 async function route(req,res,pathname,{sessionUser,getDatabase,json}){
  if(pathname!=='/api/notifications'&&!/^\/api\/notifications\/[0-9a-f]{24}\/read$/.test(pathname))return false;
  try{
@@ -35,4 +44,4 @@ async function route(req,res,pathname,{sessionUser,getDatabase,json}){
   json(res,200,{ok:true});return true;
  }catch(e){console.error('Erro em notificações:',e.message);json(res,503,{error:'Não foi possível carregar as notificações'});return true}
 }
-module.exports={welcome,friendRequest,friendResponse,route};
+module.exports={welcome,friendRequest,friendResponse,friendAccepted,route};
