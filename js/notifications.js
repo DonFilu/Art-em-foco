@@ -36,6 +36,7 @@ async function load(){
     }else{const status=document.createElement('span');status.textContent=n.status==='accepted'?'Pedido aceito':'Pedido recusado';actions.append(status)}
     actions.append(profile);detail.append(actions);
    }
+   if(n.link){const link=document.createElement('a');link.href=n.link;link.className='notification-profile';link.textContent='Ver interação';detail.append(link)}
    async function setOpen(open){
     detail.hidden=!open;btn.setAttribute('aria-expanded',String(open));hint.textContent=open?'Toque para fechar':'Toque para ler';
     if(open&&!n.readAt){
