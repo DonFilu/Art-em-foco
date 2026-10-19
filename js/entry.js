@@ -2,7 +2,8 @@
 const screen=document.getElementById('entryScreen'),button=document.getElementById('entryButton'),mount=document.getElementById('googleSignIn'),message=document.getElementById('loginMessage');if(!screen||!button)return;
 if(new URLSearchParams(location.search).get('login')==='required')message.textContent='Entre com Google para acessar a Comunidade e os perfis. Você ainda pode criar projetos como visitante.';
 function enter(){const hub=document.getElementById('hubScreen'),projects=document.getElementById('projectsScreen'),bar=document.getElementById('projectBar');if(projects)projects.hidden=true;if(bar)bar.hidden=true;if(hub)hub.hidden=false;screen.hidden=true;window.dispatchEvent(new Event('artemfoco:entered'))}
-function authenticated(user){window.artEmFocoUser=user;window.dispatchEvent(new CustomEvent('artemfoco:authenticated',{detail:user}));enter()}
+function loadNotificationTools(){if(document.querySelector('script[data-aef-notifications]'))return;const css=document.createElement('link');css.rel='stylesheet';css.href='/css/notification-toasts.css';document.head.append(css);const center=document.createElement('script');center.src='/js/notification-center.js';center.dataset.aefNotifications='center';center.onload=()=>{const toasts=document.createElement('script');toasts.src='/js/notification-toasts.js';toasts.dataset.aefNotifications='toasts';document.head.append(toasts)};document.head.append(center)}
+function authenticated(user){window.artEmFocoUser=user;loadNotificationTools();window.dispatchEvent(new CustomEvent('artemfoco:authenticated',{detail:user}));enter()}
 button.addEventListener('click',()=>{window.artEmFocoUser=null;enter()});
 async function restore(){try{const r=await fetch('/api/auth/me',{credentials:'same-origin',cache:'no-store'});if(r.ok){authenticated((await r.json()).user);return true}}catch{}return false}
 async function startGoogle(){
