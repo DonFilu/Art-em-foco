@@ -1,5 +1,6 @@
 (()=>{'use strict';
 const screen=document.getElementById('entryScreen'),button=document.getElementById('entryButton'),mount=document.getElementById('googleSignIn'),message=document.getElementById('loginMessage');if(!screen||!button)return;
+if(new URLSearchParams(location.search).get('login')==='required')message.textContent='Entre com Google para acessar a Comunidade e os perfis. Você ainda pode criar projetos como visitante.';
 function enter(){screen.hidden=true;window.dispatchEvent(new Event('artemfoco:entered'))}
 function authenticated(user){window.artEmFocoUser=user;window.dispatchEvent(new CustomEvent('artemfoco:authenticated',{detail:user}));enter()}
 button.addEventListener('click',()=>{window.artEmFocoUser=null;enter()});
