@@ -43,7 +43,7 @@ function privateArtURL(url){
  const u=new URL(url);if(u.protocol!=='https:')throw Error('URL inválida');
  const expiry=Math.floor(Date.now()/1000)+45;
  u.searchParams.set('ik-t',String(expiry));
- const signature=crypto.createHmac('sha1',key).update(u.pathname+expiry).digest('hex');
+ const parts=u.pathname.split('/').filter(Boolean);const signedPath=u.hostname==='ik.imagekit.io'&&parts.length>1?'/'+parts.slice(1).join('/') :u.pathname;const signature=crypto.createHmac('sha1',key).update(signedPath.replace(/^\//,'')+expiry).digest('hex');
  u.searchParams.set('ik-s',signature);
  return u.toString();
 }
@@ -213,7 +213,7 @@ if(pathname.startsWith('/api/art/media/')){
   if(!post)return json(res,404,{error:'Imagem não encontrada'});
   const user=await sessionUser(req);if(!await canViewArt(db,post,user))return json(res,403,{error:'Acesso restrito'});
   const upstream=await fetch(privateArtURL(post.fileURL),{signal:AbortSignal.timeout(20000),redirect:'error'});
-  if(!upstream.ok)return json(res,502,{error:'Imagem indisponível'});
+  if(!upstream.ok){console.error('ImageKit recusou imagem privada:',upstream.status);return json(res,502,{error:'Imagem indisponível'});}
   const bytes=Buffer.from(await upstream.arrayBuffer());if(bytes.length>ART_MAX+1024)return json(res,502,{error:'Arquivo inválido'});
   res.writeHead(200,{'Content-Type':post.mime,'Content-Length':bytes.length,'Cache-Control':'private, no-store, max-age=0','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Cross-Origin-Resource-Policy':'same-origin','X-Frame-Options':'DENY'});
   return res.end(bytes);
