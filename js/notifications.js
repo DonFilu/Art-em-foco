@@ -16,8 +16,24 @@ async function load(){
    const label=document.createElement('span');label.className='notification-state';label.textContent=n.readAt?'✓ Vista':'● Nova notificação';
    const heading=document.createElement('strong');heading.textContent=n.title;
    const hint=document.createElement('span');hint.className='notification-hint';hint.textContent='Toque para ler';
-   btn.append(label,heading,hint);
-   const detail=document.createElement('div');detail.className='notification-detail';detail.hidden=true;detail.textContent=n.body;
+   const date=document.createElement('small');date.className='notification-date';const when=new Date(n.createdAt);date.textContent=Number.isNaN(when.getTime())?'':when.toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'});
+   btn.append(label,heading,hint,date);
+   const detail=document.createElement('div');detail.className='notification-detail';detail.hidden=true;const description=document.createElement('p');description.textContent=n.body;detail.append(description);
+   if(n.artistId){
+    const actions=document.createElement('div');actions.className='notification-actions';
+    const profile=document.createElement('a');profile.href='/artista.html?id='+encodeURIComponent(n.artistId);profile.textContent='Ver perfil';profile.className='notification-profile';
+    if(n.status==='pending'){
+     for(const [action,text] of [['accept','✓ Aceitar'],['decline','✕ Recusar']]){
+      const button=document.createElement('button');button.type='button';button.textContent=text;button.className='notification-action '+action;
+      button.addEventListener('click',async()=>{
+       if(button.disabled)return;for(const b of actions.querySelectorAll('button'))b.disabled=true;
+       try{const r=await fetch('/api/community/friends/respond',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({artistId:n.artistId,action})});if(!r.ok){const data=await r.json().catch(()=>({}));throw Error(data.error||'Não foi possível responder ao convite')}n.status=action==='accept'?'accepted':'declined';n.readAt=new Date().toISOString();label.textContent='✓ Vista';card.classList.add('is-read');actions.querySelectorAll('button').forEach(b=>b.remove());const result=document.createElement('span');result.textContent=action==='accept'?'Pedido aceito':'Pedido recusado';actions.prepend(result)}
+       catch(e){alert(e.message);for(const b of actions.querySelectorAll('button'))b.disabled=false}
+      });actions.append(button)
+     }
+    }else{const status=document.createElement('span');status.textContent=n.status==='accepted'?'Pedido aceito':'Pedido recusado';actions.append(status)}
+    actions.append(profile);detail.append(actions);
+   }
    btn.addEventListener('click',async()=>{
     detail.hidden=!detail.hidden;btn.setAttribute('aria-expanded',String(!detail.hidden));hint.textContent=detail.hidden?'Toque para ler':'Toque para fechar';
     if(!detail.hidden&&!n.readAt){
