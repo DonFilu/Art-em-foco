@@ -11,6 +11,7 @@ const SESSION_MS=30*24*60*60*1000;
 const {ObjectId}=require('mongodb');
 const notifications=require('./modules/notifications');
 const interactions=require('./modules/interactions');
+const stories=require('./modules/stories');
 const {avatarInfo}=require('./modules/avatars');
 const ART_MAX=5*1024*1024;
 async function readArt(req){
@@ -120,6 +121,7 @@ if(pathname==='/api/auth/google'){
 }
 if(await notifications.route(req,res,pathname,{sessionUser,getDatabase,json}))return;
 if(await interactions.route(req,res,pathname,{sessionUser,getDatabase,json,canViewArt,notifications,ensureIndexes}))return;
+if(await stories.route(req,res,pathname,{sessionUser,getDatabase,json}))return;
 if(pathname==='/api/auth/me'){if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});try{const u=await sessionUser(req);return u?json(res,200,{user:safeUser(u)}):json(res,401,{error:'Sessão não encontrada'})}catch{return json(res,503,{error:'Banco de dados indisponível'})}}
 if(pathname==='/api/auth/logout'){if(req.method!=='POST')return json(res,405,{error:'Método não permitido'});try{const token=cookies(req).aef_session;if(token)await (await getDatabase()).collection('sessions').deleteOne({_id:crypto.createHash('sha256').update(token).digest('hex')});return json(res,200,{ok:true},{'Set-Cookie':cookie('',0)})}catch{return json(res,503,{error:'Não foi possível encerrar a sessão'})}}
 
@@ -290,5 +292,7 @@ if(pathname==='/termos-de-uso')pathname='/termos-de-uso.html';
 if(pathname==='/configuracoes'||pathname==='/configurações')pathname='/configuracoes.html';
 if(['/db.js','/server.js','/package.json','/package-lock.json'].includes(pathname)||pathname.startsWith('/.')){res.writeHead(404);return res.end('Não encontrado')}
 const file=path.resolve(root,'.'+pathname);if(file!==root&&!file.startsWith(root+path.sep)){res.writeHead(403);return res.end('Acesso negado')}
-fs.readFile(file,(err,data)=>{if(err){res.writeHead(err.code==='ENOENT'?404:500);return res.end('Arquivo indisponível')}const type=mime[path.extname(file)]||'application/octet-stream';if(type.startsWith('text/html'))data=Buffer.from(data.toString('utf8').replace('</head>','<script defer src="/js/avatar.js"></script></head>'));res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff'});res.end(data)})
+fs.readFile(file,(err,data)=>{if(err){res.writeHead(err.code==='ENOENT'?404:500);return res.end('Arquivo indisponível')}const type=mime[path.extname(file)]||'application/octet-stream';if(type.startsWith('text/html'))data=Buffer.from(data.toString('utf8').replace('</head>','<link rel="stylesheet" href="/css/stories.css"><script defer src="/js/avatar.js"></script><script defer src="/js/stories.js"></script></head>'));res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff'});res.end(data)})
 }).listen(port,'0.0.0.0',()=>console.log('Art em Foco online na porta '+port));
+
+setInterval(()=>getDatabase().then(stories.maintenance).catch(()=>{}),60000).unref();
