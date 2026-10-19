@@ -25,3 +25,9 @@
 .friend-controls{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:12px 0}.friend-controls[hidden]{display:none}.friend-controls button{padding:11px 17px;border:1px solid #b78a64;border-radius:11px;background:#e9b784;color:#231d1a;font:750 14px system-ui,-apple-system,sans-serif;cursor:pointer}.friend-controls button.is-friend{background:#293c37;color:#b9f0d2;border-color:#497461}.friend-controls button.is-pending{background:#30313a;color:#d8d6e2;border-color:#565663}.friend-controls button:disabled{opacity:.65;cursor:wait}#friendFeedback{font-size:13px;color:#d8b991}
 
 .friend-count-row{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:14px 0;color:#d9d6e1;font-size:14px;font-weight:700}.friend-count-row button{border:1px solid #56505e;border-radius:9px;background:#2a2932;color:#e7d6c5;padding:8px 12px;font:700 12px system-ui,-apple-system,sans-serif;cursor:pointer}.friend-count-row button[hidden],.artist-friends-list[hidden]{display:none}.artist-friends-list{display:flex;flex-direction:column;gap:8px;max-width:430px;padding:14px;border:1px solid #45414c;border-radius:12px;background:#22232b;color:#d6d2dc}.artist-friends-list a{display:block;padding:9px 10px;border-radius:8px;background:#2d2e39;color:#f4d5b2;text-decoration:none;font-size:13px}
+
+/* Barra inferior do perfil: mesmos icones da Comunidade. */
+.artist-mobile-nav .aef-nav-icon{display:block;width:25px;height:25px;stroke:currentColor;transition:transform .2s ease}
+.artist-mobile-nav a{display:flex;align-items:center;justify-content:center;min-width:44px;min-height:44px}
+.artist-mobile-nav a:hover .aef-nav-icon,.artist-mobile-nav a.current .aef-nav-icon{transform:translateY(-2px)}
+.artist-mobile-nav a.current{color:#ffc28a}
