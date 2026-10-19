@@ -12,7 +12,8 @@
  function summaryKey(viewerId){return 'aef-notification-summary:'+viewerId}
  function hasSeenSummary(viewerId){try{return sessionStorage.getItem(summaryKey(viewerId))==='1'}catch{return true}}
  function markSummarySeen(viewerId){try{sessionStorage.setItem(summaryKey(viewerId),'1')}catch{}}
- function clear(){state.viewerId=null;state.notifications=[];state.unreadCount=0;state.ready=false;state.signedOut=true;knownEvents.clear();sessionSummary=null;publish('signed-out')}
+ function reset(type,details={}){state.viewerId=null;state.notifications=[];state.unreadCount=0;state.ready=false;knownEvents.clear();sessionSummary=null;publish(type,[],details)}
+ function clear(){latestRequest++;state.signedOut=true;reset('signed-out')}
  async function refresh(force=false){
   if(document.hidden||(!force&&state.signedOut))return;
   const request=++latestRequest;
@@ -25,7 +26,7 @@
    if(request!==latestRequest)return;
    if(typeof data.viewerId!=='string'||!data.viewerId)return;
    const notifications=normalize(data.notifications),changedAccount=state.viewerId&&state.viewerId!==data.viewerId;
-   if(changedAccount){const previousViewerId=state.viewerId;state.viewerId=null;state.notifications=[];state.unreadCount=0;state.ready=false;knownEvents.clear();sessionSummary=null;publish('account-change',[],{previousViewerId,viewerId:data.viewerId})}
+   if(changedAccount){const previousViewerId=state.viewerId;reset('account-change',{previousViewerId,viewerId:data.viewerId})}
    const firstLoad=!state.ready;
    const previous=knownEvents;
    if(firstLoad){knownEvents=new Set(notifications.map(item=>item.eventKey));state.viewerId=data.viewerId;state.ready=true;state.signedOut=false;sessionSummary=null}
@@ -40,7 +41,7 @@
    if(arrived.length)publish('new',arrived);
   }catch{/* Keep the last known state on transient network failures. */}
  }
- function start(){if(timer)return;refresh(true);timer=setInterval(refresh,15000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh(true)});window.addEventListener('artemfoco:authenticated',()=>{state.signedOut=false;refresh(true)})}
+ function start(){if(timer)return;refresh(true);timer=setInterval(refresh,15000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh(true)});window.addEventListener('artemfoco:authenticated',event=>{const viewerId=event.detail?.id;latestRequest++;if(typeof viewerId==='string'&&viewerId&&state.viewerId&&state.viewerId!==viewerId){const previousViewerId=state.viewerId;reset('account-change',{previousViewerId,viewerId})}state.signedOut=false;refresh(true)});window.addEventListener('artemfoco:logout',clear)}
  window.ArtEmFocoNotifications={subscribe(listener){listeners.add(listener);if(state.ready||state.signedOut)listener({type:'state',notifications:[],state:{...state,notifications:[...state.notifications]}});if(sessionSummary)listener({type:'summary',notifications:[sessionSummary],state:{...state,notifications:[...state.notifications]}});return()=>listeners.delete(listener)},refresh};
  start();
 })();
