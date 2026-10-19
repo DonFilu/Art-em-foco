@@ -164,7 +164,7 @@ if(pathname==='/api/community/profile/friends'){
  try{
   const me=await sessionUser(req);if(!me)return json(res,401,{error:'Faça login'});
   const id=new URL(req.url,'http://localhost').searchParams.get('id')||'';
-  if(!/^AEF-\\d{8,}$/.test(id))return json(res,400,{error:'ID inválido'});
+  if(!/^AEF-\d{8,}$/.test(id))return json(res,400,{error:'ID inválido'});
   const db=await getDatabase();
   const artist=await db.collection('users').findOne({artId:id});
   if(!artist)return json(res,404,{error:'Artista não encontrado'});
