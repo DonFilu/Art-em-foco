@@ -112,6 +112,26 @@ async function addWelcomeFriends(db,newArtistId){
   await db.collection('friendships').updateOne({pair:members.join(':')},{$setOnInsert:{pair:members.join(':'),members,requester:target.artId,status:'accepted',createdAt:new Date(),acceptedAt:new Date(),automatic:true}},{upsert:true});
  }
 }
+// Persist welcome scheduling in MongoDB so restarts and closed browsers do not lose it.
+const WELCOME_DELAY_MS=40000;
+let welcomeProcessing=false;
+async function processWelcomeFriends(){
+ if(welcomeProcessing)return;
+ welcomeProcessing=true;
+ try{
+  const db=await getDatabase();
+  const due=await db.collection('users').find({welcomeFriendsDueAt:{$lte:new Date()}}).limit(25).toArray();
+  for(const artist of due){
+   try{
+    await addWelcomeFriends(db,artist.artId);
+    await db.collection('users').updateOne({_id:artist._id,welcomeFriendsDueAt:artist.welcomeFriendsDueAt},{$unset:{welcomeFriendsDueAt:''}});
+   }catch(error){console.error('Falha ao adicionar amigos de boas-vindas para '+artist.artId+':',error.message)}
+  }
+ }catch(error){console.error('Falha ao processar amigos de boas-vindas:',error.message)}
+ finally{welcomeProcessing=false}
+}
+setInterval(()=>{void processWelcomeFriends()},1000).unref();
+void processWelcomeFriends();
 async function issueSession(db,user,res){const token=crypto.randomBytes(32).toString('hex');await db.collection('sessions').insertOne({_id:crypto.createHash('sha256').update(token).digest('hex'),userId:user._id,createdAt:new Date(),expiresAt:new Date(Date.now()+SESSION_MS)});return json(res,200,{user:safeUser(user)},{'Set-Cookie':cookie(token,SESSION_MS/1000)})}
 http.createServer(async(req,res)=>{
 let pathname;try{pathname=decodeURIComponent(new URL(req.url,'http://localhost').pathname)}catch{return json(res,400,{error:'Requisição inválida'})}
@@ -126,10 +146,9 @@ if(pathname==='/api/auth/google'){
  if(!user){
    const seq=await db.collection('counters').findOneAndUpdate({_id:'artistId'},{$inc:{value:1}}, {upsert:true,returnDocument:'after'});
    const artId='AEF-'+String(seq.value).padStart(8,'0');
-   try{await users.insertOne({googleSub:payload.sub,artId,username:artId.toLowerCase(),displayName:(payload.name||'Artista').slice(0,60),email:payload.email||'',picture:payload.picture||'',bio:'',role:'artist',createdAt:now,updatedAt:now,lastLoginAt:now});}catch(e){if(e.code!==11000)throw e}
+   try{await users.insertOne({googleSub:payload.sub,artId,username:artId.toLowerCase(),displayName:(payload.name||'Artista').slice(0,60),email:payload.email||'',picture:payload.picture||'',bio:'',role:'artist',createdAt:now,updatedAt:now,lastLoginAt:now,welcomeFriendsDueAt:new Date(now.getTime()+WELCOME_DELAY_MS)});}catch(e){if(e.code!==11000)throw e}
    user=await users.findOne({googleSub:payload.sub});
    if(user){
-    try{await addWelcomeFriends(db,user.artId)}catch(error){console.error('Falha ao adicionar amigos de boas-vindas:',error.message)}
     await notifications.welcome(db,user._id);
    }
  }else{await users.updateOne({_id:user._id},{$set:{email:payload.email||'',picture:payload.picture||'',lastLoginAt:now}});user=await users.findOne({_id:user._id})}
