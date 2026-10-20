@@ -22,3 +22,13 @@
 .project-mode-grid button span{font-size:30px}.project-mode-grid button strong{font-size:13px}.project-mode-grid button small{font-size:10px;color:#c7bfd9;text-align:center}
 .project-mode-cancel{justify-self:end;border:1px solid #7775;background:transparent;color:#fff;border-radius:9px;padding:9px 17px;cursor:pointer}
 @media(max-width:370px){.project-mode-grid{gap:5px}.project-mode-grid button{padding:12px 4px}.project-mode-grid button span{font-size:24px}}
+
+/* Interface exclusiva do modulo Manga, mantendo o motor de pintura compartilhado. */
+body:not([data-project-mode="manga"]) #mangaTools{display:none!important}
+body[data-project-mode="manga"] #framePlay,body[data-project-mode="manga"] #onionToggle,body[data-project-mode="manga"] #frameDuration,body[data-project-mode="manga"] #fps,body[data-project-mode="manga"] #fpsText{display:none!important}
+body[data-project-mode="manga"] #frameDuration+span{display:none!important}
+body[data-project-mode="manga"] #animPanel .anim-bar>label:has(#onionToggle),body[data-project-mode="manga"] #animPanel .anim-bar>label:has(#frameDuration),body[data-project-mode="manga"] #animPanel .anim-bar>label:has(#fps){display:none!important}
+body[data-project-mode="manga"] #animPanel .anim-bar>b{font-size:0}
+body[data-project-mode="manga"] #animPanel .anim-bar>b::after{content:'📖 Páginas do mangá';font-size:14px}
+.manga-tools{display:grid;gap:9px}.manga-tools>button,.manga-actions button{border:1px solid #7777;background:#40364e;color:#fff;border-radius:9px;padding:10px;cursor:pointer}
+.manga-field{display:grid;gap:5px;font-size:12px}.manga-field input,.manga-field select{width:100%;box-sizing:border-box;padding:9px;border:1px solid #7778;border-radius:8px;background:#242231;color:#fff}.manga-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.manga-tools small{font-size:11px;opacity:.7;line-height:1.5}
