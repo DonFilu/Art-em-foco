@@ -45,7 +45,7 @@ async function canViewArt(db,post,user){
 function privateArtURL(url,feed=false){
  const key=process.env.IMAGEKIT_PRIVATE_KEY;if(!key)throw Error('ImageKit não configurado');
  const u=new URL(url);if(u.protocol!=='https:')throw Error('URL inválida');
- if(feed)u.searchParams.set('tr','w-1080,q-85');
+ if(feed){const parts=u.pathname.split('/');const file=parts.pop();u.pathname=parts.join('/')+'/tr:w-1080,q-85/'+file;}
  const expiry=Math.floor(Date.now()/1000)+45;
  u.searchParams.set('ik-t',String(expiry));
  const parts=u.pathname.split('/').filter(Boolean);const signedPath=u.hostname==='ik.imagekit.io'&&parts.length>1?'/'+parts.slice(1).join('/') :u.pathname;const signature=crypto.createHmac('sha1',key).update(signedPath.replace(/^\//,'')+expiry).digest('hex');
