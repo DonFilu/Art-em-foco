@@ -24,6 +24,8 @@ async function cleanupPost(db,postId){const comments=await db.collection('art_co
 async function route(req,res,pathname,{sessionUser,getDatabase,json,canViewArt,notifications,ensureIndexes}){
  const match=/^\/api\/art\/posts\/([a-f0-9]{24})(?:\/(like)|\/(comments)(?:\/([a-f0-9]{24})(?:\/(replies|like))?)?)?$/.exec(pathname);
  if(!match)return false;
+ // A exclusão da publicação é tratada pelo servidor principal, que verifica autoria e remove mídia/interações.
+ if(req.method==='DELETE'&&!match[2]&&!match[3])return false;
  const [,postId,postLike,commentsAction,commentId,commentAction]=match,postAction=postLike||commentsAction;
  try{
   const user=await sessionUser(req),db=await getDatabase(),params=new URL(req.url,'http://localhost').searchParams;if(!indexesReady)indexesReady=ensureIndexes(db).catch(error=>{indexesReady=null;throw error});await indexesReady;
