@@ -1,0 +1,31 @@
+/* Compact, premium mobile-first home hub. Scoped to avoid affecting the editor. */
+.hub-screen{background:radial-gradient(ellipse 85% 42% at 52% -12%,rgba(115,78,192,.24),transparent 75%),#0d0e18;color:#f7f4ff}
+.hub-shell{max-width:680px;padding:clamp(26px,6vh,64px) clamp(18px,5vw,34px) 35px;text-align:left}
+.hub-brand{display:flex;align-items:center;gap:11px;margin:0 0 clamp(35px,8vh,76px);font-size:25px;font-weight:850;letter-spacing:-.045em;line-height:1.08}
+.hub-brand-mark{display:grid;place-items:center;width:42px;height:42px;border-radius:14px;background:#2c2347;color:#c6adff;font-size:24px}
+.hub-brand em{font-style:normal;color:#b8a1ff}
+.hub-brand .cidio-subbrand{font-size:10px!important;letter-spacing:.12em!important;margin-top:4px!important}
+.hub-brand-spark{margin-left:auto;display:grid;place-items:center;width:40px;height:40px;border:1px solid #3d315d;border-radius:50%;background:#201b32;color:#d0b6ff;font-size:24px}
+.hub-intro{margin-bottom:28px}
+.hub-eyebrow{display:block;color:#bba8e9;font-size:11px;font-weight:750;letter-spacing:.17em;margin-bottom:10px}
+.hub-shell .hub-intro h1{font-size:clamp(27px,5.5vw,38px);line-height:1.14;letter-spacing:-.035em;margin:0 0 10px;text-wrap:balance}
+.hub-shell .hub-intro p{margin:0;color:#aaa5c1;font-size:clamp(13px,3.4vw,16px);line-height:1.55}
+.hub-choices{grid-template-columns:1fr;gap:13px}
+.hub-choices button{position:relative;display:flex;flex-direction:row;align-items:center;gap:16px;width:100%;min-height:104px;padding:17px 18px;border-radius:18px;text-align:left;box-shadow:0 9px 30px #00000019;transition:transform .18s ease,border-color .18s ease,background .18s ease}
+.hub-choices button:active{transform:scale(.987)}
+.hub-choices #hubProjects{background:linear-gradient(115deg,#231c37,#1b1a2b);border:1px solid #554477}
+.hub-choices #hubCommunity{background:linear-gradient(115deg,#19293a,#19202f);border:1px solid #345472}
+.hub-choices #hubRanking{background:linear-gradient(115deg,#30263b,#231f2f);border:1px solid #80613e}
+.hub-choices .hub-icon{display:grid;place-items:center;flex:0 0 62px;width:62px;height:62px;border-radius:15px;font-size:31px;line-height:1;background:#392951}
+.hub-choices #hubCommunity .hub-icon{background:#253e55}
+.hub-choices #hubRanking .hub-icon{background:#493722}
+.hub-choice-copy{display:flex;flex-direction:column;gap:5px;flex:1;min-width:0}
+.hub-choices .hub-choice-copy strong{font-size:clamp(19px,4.7vw,23px);line-height:1.1;font-weight:750;letter-spacing:-.02em}
+.hub-choices .hub-choice-copy small{font-size:clamp(12px,3vw,14px);line-height:1.4;color:#bcb6cc}
+.hub-choices .hub-arrow{flex:0 0 auto;margin:0;font-size:29px;line-height:1;color:#c6aaff;font-weight:400}
+.hub-choices #hubCommunity .hub-arrow{color:#80c6f4}
+.hub-choices #hubRanking .hub-arrow{color:#f0c678}
+.hub-footnote{text-align:center;margin:28px 0 0!important;color:#9d90bb!important;font-size:12px!important}
+@media(min-width:700px){.hub-shell{padding-top:70px}.hub-choices button{min-height:118px;padding:20px 24px}.hub-choices{gap:16px}}
+@media(max-width:380px){.hub-shell{padding-left:15px;padding-right:15px}.hub-choices button{padding:14px;gap:12px;min-height:94px}.hub-choices .hub-icon{width:54px;height:54px;flex-basis:54px;font-size:27px}.hub-brand{margin-bottom:28px}.hub-intro{margin-bottom:22px}}
+@media(prefers-reduced-motion:reduce){.hub-choices button{transition:none}}
