@@ -101,6 +101,17 @@ async function discordImageBytes(ref){
 
 async function sessionUser(req){const token=cookies(req).aef_session;if(!token||! /^[a-f0-9]{64}$/.test(token))return null;const db=await getDatabase();const session=await db.collection('sessions').findOne({_id:crypto.createHash('sha256').update(token).digest('hex'),expiresAt:{$gt:new Date()}});if(!session)return null;return db.collection('users').findOne({_id:session.userId})}
 async function ensureIndexes(db){await Promise.all([db.collection('users').createIndex({googleSub:1},{unique:true}),db.collection('users').createIndex({artId:1},{unique:true}),db.collection('users').createIndex({username:1},{unique:true,sparse:true}),db.collection('friendships').createIndex({pair:1},{unique:true}),db.collection('sessions').createIndex({expiresAt:1},{expireAfterSeconds:0}),db.collection('notifications').createIndex({userId:1,type:1},{unique:true}),db.collection('post_likes').createIndex({postId:1,userId:1},{unique:true}),db.collection('post_likes').createIndex({userId:1,postId:1}),db.collection('art_comments').createIndex({postId:1,parentId:1,_id:-1}),db.collection('comment_likes').createIndex({commentId:1,userId:1},{unique:true}),db.collection('comment_likes').createIndex({userId:1,commentId:1})])}
+async function addWelcomeFriends(db,newArtistId){
+ // These are the official welcome accounts; override with CIDIO_ART_WELCOME_FRIEND_IDS if needed.
+ const configured=process.env.CIDIO_ART_WELCOME_FRIEND_IDS;
+ const ids=[...new Set((configured===undefined?'AEF-00000003,AEF-00000005':configured).split(/[;,\\s]+/).map(x=>x.trim()).filter(x=>/^AEF-\\d{8,}$/.test(x)&&x!==newArtistId))];
+ if(!ids.length)return;
+ const existing=await db.collection('users').find({artId:{$in:ids}},{projection:{artId:1}}).toArray();
+ for(const target of existing){
+  const members=[newArtistId,target.artId].sort();
+  await db.collection('friendships').updateOne({pair:members.join(':')},{$setOnInsert:{pair:members.join(':'),members,requester:target.artId,status:'accepted',createdAt:new Date(),acceptedAt:new Date(),automatic:true}},{upsert:true});
+ }
+}
 async function issueSession(db,user,res){const token=crypto.randomBytes(32).toString('hex');await db.collection('sessions').insertOne({_id:crypto.createHash('sha256').update(token).digest('hex'),userId:user._id,createdAt:new Date(),expiresAt:new Date(Date.now()+SESSION_MS)});return json(res,200,{user:safeUser(user)},{'Set-Cookie':cookie(token,SESSION_MS/1000)})}
 http.createServer(async(req,res)=>{
 let pathname;try{pathname=decodeURIComponent(new URL(req.url,'http://localhost').pathname)}catch{return json(res,400,{error:'Requisição inválida'})}
@@ -117,7 +128,10 @@ if(pathname==='/api/auth/google'){
    const artId='AEF-'+String(seq.value).padStart(8,'0');
    try{await users.insertOne({googleSub:payload.sub,artId,username:artId.toLowerCase(),displayName:(payload.name||'Artista').slice(0,60),email:payload.email||'',picture:payload.picture||'',bio:'',role:'artist',createdAt:now,updatedAt:now,lastLoginAt:now});}catch(e){if(e.code!==11000)throw e}
    user=await users.findOne({googleSub:payload.sub});
-   if(user)await notifications.welcome(db,user._id);
+   if(user){
+    try{await addWelcomeFriends(db,user.artId)}catch(error){console.error('Falha ao adicionar amigos de boas-vindas:',error.message)}
+    await notifications.welcome(db,user._id);
+   }
  }else{await users.updateOne({_id:user._id},{$set:{email:payload.email||'',picture:payload.picture||'',lastLoginAt:now}});user=await users.findOne({_id:user._id})}
  return issueSession(db,user,res)
  }catch(e){console.error('Falha ao persistir login:',e.message);return json(res,503,{error:'Não foi possível salvar a conta no banco de dados'})}
