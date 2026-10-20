@@ -2,3 +2,7 @@
 .entry-card .google-signin{min-height:44px;display:flex;justify-content:center;margin:0 0 13px}.entry-card #entryButton{background:#302d45;border:1px solid #716a93;color:#f4f1ff;font-size:15px}.entry-card #entryButton:hover{background:#403a5c}.entry-card #loginMessage{line-height:1.5}.entry-card .google-signin iframe{max-width:100%}
 
 .entry-card .entry-legal{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:8px;margin-top:18px;font-size:12px}.entry-legal a{color:#c8b8ff;text-decoration:underline;text-underline-offset:3px}.entry-legal span{color:#8d889e}
+
+/* Identidade visual da entrada */
+.entry-card .entry-logo{display:block;width:min(74%,230px);height:auto;max-height:230px;object-fit:contain;margin:0 auto 14px;filter:drop-shadow(0 12px 25px #0005)}
+@media(max-width:480px){.entry-card .entry-logo{width:min(70%,190px);max-height:190px}.entry-card{padding-top:28px;padding-bottom:28px}}
