@@ -40,7 +40,7 @@ async function route(req,res,pathname,{sessionUser,getDatabase,json}){
   const viewer=await sessionUser(req);
   if(!viewer)return json(res,401,{error:'Faça login para consultar o ranking'}),true;
   const db=await getDatabase();
-  if(prestige){const rows=await scores(db);rows.sort((a,b)=>b.totalLikes-a.totalLikes||String(a._id).localeCompare(String(b._id)));const result=rows.slice(0,10).map((row,i)=>({id:row._id,rank:i+1}));if(result.length<10){const fillers=await db.collection('users').find({artId:{$nin:rows.map(r=>r._id)}},{projection:{artId:1}}).sort({artId:1}).limit(10-result.length).toArray();for(const u of fillers)result.push({id:u.artId,rank:result.length+1})}res.setHeader('Cache-Control','private, no-store');return json(res,200,{artists:result}),true;}
+  if(prestige){const rows=await scores(db);rows.sort((a,b)=>b.totalLikes-a.totalLikes||String(a._id).localeCompare(String(b._id)));if(rows.length&&rows[0].totalLikes>0)await require('./badges').markTop(db,rows[0]._id);const result=rows.slice(0,10).map((row,i)=>({id:row._id,rank:i+1}));if(result.length<10){const fillers=await db.collection('users').find({artId:{$nin:rows.map(r=>r._id)}},{projection:{artId:1}}).sort({artId:1}).limit(10-result.length).toArray();for(const u of fillers)result.push({id:u.artId,rank:result.length+1})}res.setHeader('Cache-Control','private, no-store');return json(res,200,{artists:result}),true;}
   if(match){
    const artistId=match[1];
    if(!ARTIST_ID.test(artistId))return json(res,400,{error:'Artista inválido'}),true;
