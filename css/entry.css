@@ -9,3 +9,15 @@
 
 /* Cartão de entrada: contraste suave e mais luminosidade */
 .entry-card{background:linear-gradient(155deg,rgba(49,47,75,.96),rgba(37,39,62,.97));border-color:rgba(193,180,255,.24);box-shadow:0 28px 85px #0006, inset 0 1px 0 #ffffff0b}
+
+/* Cartão de entrada claro, harmonizado com o seletor de contas do Google */
+.entry-screen .entry-card{background:#fff;border:1px solid #e9e6f3;color:#222238;box-shadow:0 30px 90px #0007}
+.entry-screen .entry-card h1{color:#202034}
+.entry-screen .entry-card p{color:#57576c}
+.entry-screen .entry-card #entryButton{background:#f0ebff;border:1px solid #b8a8ed;color:#3e3272}
+.entry-screen .entry-card #entryButton:hover{background:#e6ddff}
+.entry-screen .entry-card #loginMessage{color:#66667b}
+.entry-screen .entry-card .entry-legal a{color:#5946a3}
+.entry-screen .entry-card .entry-legal span{color:#aaa4b9}
+.entry-screen .entry-card .cidio-subbrand{color:#6c6880;opacity:.85!important}
+.entry-screen .entry-card .google-signin{background:#fff;border-radius:12px;overflow:hidden}
