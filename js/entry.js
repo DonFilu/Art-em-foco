@@ -10,8 +10,7 @@ function welcome(done){
  #cidioWelcome .cw-wash{position:absolute;inset:-20%;background:linear-gradient(120deg,#9b77ff,#5ca9ff 35%,#ff75b5 68%,#ffc87d);clip-path:inset(0 100% 0 0);animation:cwPaint 1.65s cubic-bezier(.2,.8,.3,1) forwards;opacity:.86}
  #cidioWelcome .cw-brush{position:absolute;top:49%;left:-20%;font-size:clamp(58px,14vw,100px);filter:drop-shadow(0 9px 12px #0008);transform:translate(-50%,-50%) rotate(-35deg);animation:cwBrush 1.65s cubic-bezier(.2,.8,.3,1) forwards;z-index:2}
  #cidioWelcome .cw-brand{position:relative;z-index:3;text-align:center;opacity:0;transform:translateY(16px) scale(.95);animation:cwReveal .65s 1.25s ease-out forwards;text-shadow:0 4px 24px #12101c88}
- #cidioWelcome .cw-brand strong{display:block;font:900 clamp(42px,11vw,108px)/1 system-ui,sans-serif;letter-spacing:-.065em}
- #cidioWelcome .cw-brand small{display:block;margin-top:12px;font:500 clamp(10px,2.3vw,14px)/1.4 system-ui,sans-serif;letter-spacing:.4em;text-transform:uppercase}
+ #cidioWelcome .cw-logo{display:block;width:min(72vw,330px);max-height:55vh;height:auto;object-fit:contain;filter:drop-shadow(0 15px 28px #0005)}
  #cidioWelcome .cw-skip{position:absolute;bottom:25px;right:25px;z-index:5;border:1px solid #ffffff66;border-radius:30px;background:#16162288;color:#fff;padding:10px 18px;font:500 13px system-ui,sans-serif;cursor:pointer}
  #cidioWelcome.cw-exit{animation:cwExit .5s ease-in forwards}
  @keyframes cwPaint{0%{clip-path:inset(0 100% 0 0)}100%{clip-path:inset(0 0 0 0)}}
@@ -19,7 +18,7 @@ function welcome(done){
  @keyframes cwReveal{to{opacity:1;transform:translateY(0) scale(1)}}
  @keyframes cwExit{to{opacity:0;visibility:hidden}}
  `;document.head.append(style);
- const overlay=document.createElement('div');overlay.id='cidioWelcome';overlay.setAttribute('role','status');overlay.setAttribute('aria-label','Bem-vindo ao Cidio Art');overlay.innerHTML='<div class="cw-wash"></div><div class="cw-brush" aria-hidden="true">🖌️</div><div class="cw-brand"><strong>CIDIO ART</strong><small>art em foco</small></div><button type="button" class="cw-skip">Pular animação →</button>';
+ const overlay=document.createElement('div');overlay.id='cidioWelcome';overlay.setAttribute('role','status');overlay.setAttribute('aria-label','Bem-vindo ao Cidio Art');overlay.innerHTML='<div class="cw-wash"></div><div class="cw-brush" aria-hidden="true">🖌️</div><div class="cw-brand"><img class="cw-logo" src="/assets/logo/file_00000000b1bc820eb89e7b675b7b77fa.png" alt="Cidio Art — art em foco"></div><button type="button" class="cw-skip">Pular animação →</button>';
  document.body.append(overlay);
  let finished=false;let timer;
  const finish=()=>{if(finished)return;finished=true;clearTimeout(timer);overlay.classList.add('cw-exit');done();setTimeout(()=>{overlay.remove();style.remove()},520)};
