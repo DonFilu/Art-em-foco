@@ -3,3 +3,9 @@
 
 /* Publicação de projetos */
 .publish-project-dialog{border:1px solid #44405c;border-radius:18px;background:#1b1b29;color:#f6f4ff;width:min(92vw,460px);max-height:90vh;padding:0;box-shadow:0 22px 70px #0009}.publish-project-dialog::backdrop{background:#080811c9}.publish-project-form{display:grid;gap:15px;padding:23px}.publish-project-form h2{margin:0;font-size:1.3rem}.publish-project-form p{margin:0;color:#c5c1d6}.publish-project-form label{display:grid;gap:8px}.publish-project-form textarea{width:100%;box-sizing:border-box;background:#10101c;color:#fff;border:1px solid #54516a;border-radius:10px;padding:12px;resize:vertical;font:inherit}.publish-project-form fieldset{border:1px solid #54516a;border-radius:10px;display:grid;gap:10px}.publish-project-form fieldset label{display:flex;align-items:center;gap:9px}.publish-project-buttons{display:flex;gap:10px;justify-content:flex-end}.publish-project-buttons button{border:0;border-radius:10px;padding:11px 17px;cursor:pointer;background:#373447;color:white}.publish-project-buttons button:first-child{background:#8d6eff;color:#fff}.publish-project-form #publishProjectStatus{font-size:.9rem;color:#f1c78d}
+
+/* Selecao multipla de abas na publicacao. */
+.publish-frame-choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(95px,1fr));gap:8px;max-height:180px;overflow-y:auto;margin:10px 0}
+.publish-frame-choice{display:flex;align-items:center;gap:8px;padding:10px;border:1px solid #7776;border-radius:10px;cursor:pointer;background:#ffffff08;font-size:13px}
+.publish-frame-choice:has(input:checked){border-color:#9d83ff;background:#9d83ff20}
+.publish-frame-choice input{accent-color:#9d83ff;width:16px;height:16px}
