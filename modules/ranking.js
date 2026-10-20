@@ -51,6 +51,7 @@ async function route(req,res,pathname,{sessionUser,getDatabase,json}){
   }
   const rows=await scores(db);
   rows.sort((a,b)=>b.totalLikes-a.totalLikes||String(a._id).localeCompare(String(b._id)));
+  if(rows.length&&rows[0].totalLikes>0)await require('./badges').markTop(db,rows[0]._id);
   const fillers=rows.length<10?await db.collection('users').find({artId:{$nin:rows.map(row=>row._id)}},{projection:{artId:1,displayName:1,username:1,avatar:1,picture:1,avatarDiscord:1,avatarUpdatedAt:1}}).sort({artId:1}).limit(10-rows.length).toArray():[];
   const topRows=[...rows,...fillers.map(user=>({_id:user.artId,totalLikes:0,user}))].slice(0,10);
   const viewerIndex=rows.findIndex(row=>row._id===viewer.artId),viewerRow=viewerIndex>=0?rows[viewerIndex]:null;
