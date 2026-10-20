@@ -1,0 +1,1 @@
+(()=>{'use strict';window.ArtEmFocoDrawing={id:'drawing',features:{},sharedEngine:true};})();
