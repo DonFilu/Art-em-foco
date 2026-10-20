@@ -25,7 +25,7 @@ async function readArt(req){
  if(!buffer.length||buffer.length>ART_MAX)throw Error('Arquivo muito grande (máximo 5 MB)');
  const valid=mime==='image/png'?buffer.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')):mime==='image/jpeg'?buffer[0]===255&&buffer[1]===216&&buffer[2]===255:mime==='image/webp'?buffer.toString('ascii',0,4)==='RIFF'&&buffer.toString('ascii',8,12)==='WEBP':buffer.toString('ascii',0,3)==='GIF';
  if(!valid)throw Error('Arquivo de imagem inválido');
- return {buffer,mime,description:data.description.trim(),visibility:data.visibility,extension:mime.split('/')[1].replace('jpeg','jpg')};
+ return {buffer,mime,referenceUsed:data.referenceUsed===true,description:data.description.trim(),visibility:data.visibility,extension:mime.split('/')[1].replace('jpeg','jpg')};
 }
 async function uploadPrivateArt(art,user){
  const key=process.env.IMAGEKIT_PRIVATE_KEY;if(!key)throw Error('ImageKit não configurado');
@@ -63,7 +63,7 @@ function publicUser(u){return {id:u.artId,username:u.username||u.artId.toLowerCa
 async function postViews(db,posts,user,artists=new Map()){
  const ids=posts.map(post=>post._id);let liked=new Set();
  if(user&&ids.length){const rows=await db.collection('post_likes').find({userId:user._id,postId:{$in:ids}},{projection:{postId:1}}).toArray();liked=new Set(rows.map(row=>String(row.postId)))}
- return posts.map(post=>({id:post._id.toString(),authorId:post.authorId,artist:artists.get(post.authorId)||null,description:post.description,visibility:post.visibility,createdAt:post.createdAt,image:'/api/art/media/'+post._id.toString()+'?size=feed',imageFull:'/api/art/media/'+post._id.toString(),likeCount:post.likeCount||0,commentCount:post.commentCount||0,likedByViewer:liked.has(String(post._id))}));
+ return posts.map(post=>({id:post._id.toString(),authorId:post.authorId,artist:artists.get(post.authorId)||null,description:post.description,visibility:post.visibility,referenceUsed:post.referenceUsed===true,createdAt:post.createdAt,image:'/api/art/media/'+post._id.toString()+'?size=feed',imageFull:'/api/art/media/'+post._id.toString(),likeCount:post.likeCount||0,commentCount:post.commentCount||0,likedByViewer:liked.has(String(post._id))}));
 }
 
 async function readImageUpload(req){
@@ -225,7 +225,7 @@ if(pathname==='/api/art/publish'){
   const recent=await db.collection('art_posts').countDocuments({authorId:user.artId,createdAt:{$gte:new Date(Date.now()-3600000)}});
   if(recent>=10)return json(res,429,{error:'Limite de 10 publicações por hora'});
   const art=await readArt(req),uploaded=await uploadPrivateArt(art,user);
-  const result=await db.collection('art_posts').insertOne({authorId:user.artId,description:art.description,visibility:art.visibility,mime:art.mime,fileId:uploaded.fileId,fileURL:uploaded.url,likeCount:0,commentCount:0,createdAt:new Date()});
+  const result=await db.collection('art_posts').insertOne({authorId:user.artId,description:art.description,visibility:art.visibility,referenceUsed:art.referenceUsed,mime:art.mime,fileId:uploaded.fileId,fileURL:uploaded.url,likeCount:0,commentCount:0,createdAt:new Date()});
   return json(res,201,{ok:true,id:result.insertedId.toString()});
  }catch(e){console.error('Falha ao publicar arte:',e.message);return json(res,/inválid|grande|limite/i.test(e.message)?400:503,{error:e.message||'Falha ao publicar'})}
 }
