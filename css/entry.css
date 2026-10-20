@@ -21,3 +21,29 @@
 .entry-screen .entry-card .entry-legal span{color:#aaa4b9}
 .entry-screen .entry-card .cidio-subbrand{color:#6c6880;opacity:.85!important}
 .entry-screen .entry-card .google-signin{background:#fff;border-radius:12px;overflow:hidden}
+
+/* Refinamento final da tela de boas-vindas */
+.entry-screen{padding:clamp(12px,3.5vw,24px);overflow-y:auto;overscroll-behavior:contain}
+.entry-screen .entry-card{flex-shrink:0;border-radius:30px;padding:clamp(26px,5vw,40px) clamp(20px,5vw,30px);box-shadow:0 24px 70px #05040b80,0 2px 14px #05040b1c}
+.entry-screen .entry-card .entry-logo{width:min(80%,250px);max-height:250px;height:auto;margin:0 auto 10px;filter:drop-shadow(0 8px 16px #1a18301a)}
+.entry-screen .entry-card h1{font-size:clamp(33px,8vw,45px);letter-spacing:-1.5px;line-height:1.08}
+.entry-screen .entry-card h1 .cidio-subbrand{margin-top:8px!important;font-size:11px!important;letter-spacing:.16em!important}
+.entry-screen .entry-card p{margin:18px 0 22px;font-size:16px;line-height:1.4}
+.entry-screen .entry-card .google-signin{margin-bottom:13px;min-height:44px}
+.entry-screen .entry-card #entryButton{min-height:54px;border-radius:16px;transition:background .2s,border-color .2s,transform .2s}
+.entry-screen .entry-card #entryButton:focus-visible,.entry-screen .entry-card .entry-legal a:focus-visible{outline:3px solid #7763d2;outline-offset:3px}
+.entry-screen .entry-card #loginMessage{margin-top:17px}
+.entry-screen .entry-card .entry-legal{margin-top:20px}
+@media(max-width:480px){
+ .entry-screen .entry-card{padding:28px 22px;border-radius:28px}
+ .entry-screen .entry-card .entry-logo{width:min(78%,210px);max-height:210px;margin-bottom:8px}
+ .entry-screen .entry-card p{margin:15px 0 21px}
+}
+@media(max-height:740px){
+ .entry-screen{align-items:flex-start}
+ .entry-screen .entry-card{margin:auto}
+ .entry-screen .entry-card .entry-logo{max-height:160px;width:min(65%,170px)}
+ .entry-screen .entry-card p{margin:12px 0 16px}
+ .entry-screen .entry-card .entry-legal{margin-top:14px}
+}
+@media(prefers-reduced-motion:reduce){.entry-screen .entry-card #entryButton{transition:none}}
