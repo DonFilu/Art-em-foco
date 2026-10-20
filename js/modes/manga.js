@@ -1,0 +1,1 @@
+(()=>{'use strict';window.ArtEmFocoManga={id:'manga',features:{},sharedEngine:true};})();
