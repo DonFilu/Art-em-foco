@@ -1,0 +1,15 @@
+/* Rank-specific presentation; aura slot reserved for future visual effects. */
+.cidio-premium-name{display:inline-block;font-weight:750!important;background:var(--cidio-rank-gradient)!important;background-clip:text!important;-webkit-background-clip:text!important;color:transparent!important;-webkit-text-fill-color:transparent!important}
+.cidio-premium-avatar{position:relative!important;isolation:isolate;border:3px solid transparent!important;background:linear-gradient(#161922,#161922) padding-box,var(--cidio-rank-gradient) border-box!important;border-radius:50%!important;box-sizing:border-box!important}
+.cidio-premium-avatar img{border-radius:50%!important}
+.cidio-rank-1{--cidio-rank-gradient:linear-gradient(100deg,#ff557e,#ffc54d,#54e5a3,#52b9ff,#bf72ff,#ff557e)}
+.cidio-rank-2{--cidio-rank-gradient:linear-gradient(110deg,#5aa8ff,#f0fdff,#7896ff)}
+.cidio-rank-3{--cidio-rank-gradient:linear-gradient(110deg,#aa701b,#ffe6a0,#d89b25)}
+.cidio-rank-4{--cidio-rank-gradient:linear-gradient(110deg,#6c32c9,#e1a3ff,#9e50ef)}
+.cidio-rank-5{--cidio-rank-gradient:linear-gradient(110deg,#9d1537,#ff8795,#e62756)}
+.cidio-rank-6{--cidio-rank-gradient:linear-gradient(110deg,#087e5b,#7df4c2,#11aa79)}
+.cidio-rank-7{--cidio-rank-gradient:linear-gradient(110deg,#1743b1,#83c3ff,#3866ee)}
+.cidio-rank-8{--cidio-rank-gradient:linear-gradient(110deg,#bc3188,#ffd0ed,#ed5bae)}
+.cidio-rank-9{--cidio-rank-gradient:linear-gradient(110deg,#854627,#f4bb86,#ae6338)}
+.cidio-rank-10{--cidio-rank-gradient:linear-gradient(110deg,#768497,#f3f6ff,#9ba9ba)}
+@media(prefers-reduced-motion:no-preference){.cidio-premium-name.cidio-rank-1{background-size:300% 100%!important;animation:cidio-rainbow 5s linear infinite}}@keyframes cidio-rainbow{to{background-position:300% 0}}
