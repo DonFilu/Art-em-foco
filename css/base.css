@@ -40,3 +40,8 @@ button{border-radius:9px;background:#333d4a;border-color:#4a5665;transition:back
 .aef-brush-chevron{font-size:20px;transition:transform .2s}
 .aef-brush-accordion[open] .aef-brush-chevron{transform:rotate(180deg)}
 .aef-brush-accordion .aef-brush-gallery{padding:0 9px 10px;margin-top:0}
+
+/* A galeria completa rola dentro da caixa aberta, sem ultrapassar a tela. */
+.aef-brush-accordion[open] .aef-brush-gallery{max-height:min(58vh,440px);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;align-content:start;-webkit-overflow-scrolling:touch}
+.aef-brush-accordion .aef-brush-option{min-height:80px}
+@media(max-width:360px){.aef-brush-gallery{grid-template-columns:minmax(0,1fr)}}
