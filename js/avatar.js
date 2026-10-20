@@ -5,5 +5,5 @@
  window.ArtEmFocoAvatar={set,background};
  function account(){const user=window.artEmFocoUser,button=document.querySelector('#artistAccount .artist-account-button');if(!user||!button)return;button.querySelectorAll(':scope > img').forEach(image=>image.remove());let holder=button.querySelector('.aef-account-avatar');if(!holder){holder=document.createElement('span');holder.className='aef-account-avatar';button.prepend(holder)}set(holder,user,{placeholder:'🎨'})}
  window.addEventListener('artemfoco:authenticated',()=>setTimeout(account));window.addEventListener('artemfoco:entered',()=>setTimeout(account));setTimeout(account);
- if(location.pathname==='/artista.html'){const id=new URLSearchParams(location.search).get('id');if(/^AEF-\d{8,}$/.test(id||''))fetch('/api/community/profile?id='+encodeURIComponent(id),{credentials:'same-origin',cache:'no-store'}).then(response=>response.ok?response.json():null).then(data=>{if(data?.artist)background(document.getElementById('artistAvatar'),data.artist)}).catch(()=>{})}
+ // Artist page sets profile images from its own authenticated profile response.
 })();
