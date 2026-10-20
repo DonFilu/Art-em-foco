@@ -33,7 +33,7 @@ async function load(){
        catch(e){alert(e.message);for(const b of actions.querySelectorAll('button'))b.disabled=false}
       });actions.append(button)
      }
-    }else{const status=document.createElement('span');status.textContent=n.status==='accepted'?'Pedido aceito':'Pedido recusado';actions.append(status)}
+    }else if(n.status==='accepted'||n.status==='declined'){const status=document.createElement('span');status.textContent=n.status==='accepted'?'Pedido aceito':'Pedido recusado';actions.append(status)}
     actions.append(profile);detail.append(actions);
    }
    if(n.link){const link=document.createElement('a');link.href=n.link;link.className='notification-profile';link.textContent='Ver interação';detail.append(link)}
