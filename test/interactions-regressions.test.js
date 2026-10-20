@@ -32,3 +32,9 @@ test('post interaction cleanup is idempotent and scoped to the post',()=>{
  assert.match(server,/async function cleanupPost\(db,postId\)/);
  assert.match(server,/deleteMany\(\{postId\}\)/);
 });
+
+test('the server rejects self-likes and rate-limits repeated like operations',()=>{
+ assert.match(server,/post\.authorId===user\.artId/);
+ assert.match(server,/function tooManyLikes\(user\)/);
+ assert.match(server,/Muitas curtidas em pouco tempo/);
+});

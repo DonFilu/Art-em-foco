@@ -1,0 +1,17 @@
+(()=>{'use strict';
+ const profileId=()=>new URLSearchParams(location.search).get('id')||'';
+ async function get(url){const response=await fetch(url,{credentials:'same-origin',cache:'no-store'}),data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||'Não foi possível carregar');return data}
+ function profileLink(artist){return '/artista.html?id='+encodeURIComponent(artist.id)}
+ function avatar(holder,artist){window.ArtEmFocoAvatar?.set(holder,artist,{placeholder:'🎨',label:'Foto de perfil de '+artist.name})}
+ async function ranking(){
+  const root=document.getElementById('rankingList');if(!root)return;
+  try{const {artists=[],viewerPosition,viewerTotalLikes}=await get('/api/ranking/top-artists');root.replaceChildren();if(!artists.length){const empty=document.createElement('p');empty.className='aef-ranking-empty';empty.textContent='Ainda não há curtidas para classificar.';root.append(empty);return}artists.forEach(artist=>{const item=document.createElement('li'),link=document.createElement('a'),position=document.createElement('span'),image=document.createElement('span'),name=document.createElement('strong'),likes=document.createElement('span');link.href=profileLink(artist);link.setAttribute('aria-label',artist.position+'. '+artist.name+', '+artist.totalLikes+' curtidas');position.className='aef-ranking-position';position.textContent=artist.position+'º';image.className='aef-ranking-avatar';avatar(image,artist);name.textContent=artist.name;likes.className='aef-ranking-likes';likes.textContent='♥ '+artist.totalLikes;link.append(position,image,name,likes);item.append(link);root.append(item)});const mine=document.getElementById('rankingViewer');if(mine){if(viewerPosition>10){mine.hidden=false;mine.textContent=viewerPosition+'º — Você — ♥ '+viewerTotalLikes}else mine.hidden=true}}catch(error){root.textContent=error.message}
+ }
+ async function profile(){
+  const id=profileId();if(!/^AEF-\d{8,}$/.test(id))return;
+  try{const data=await get('/api/ranking/artists/'+encodeURIComponent(id));const current=document.getElementById('aefArtistLikes');if(current)return;const likes=document.createElement('p');likes.id='aefArtistLikes';likes.className='aef-artist-likes';likes.setAttribute('aria-label',data.totalLikes+' curtidas acumuladas');likes.textContent='♥ '+data.totalLikes+' curtidas acumuladas';const target=document.querySelector('.identity .handle-row');if(target)target.insertAdjacentElement('afterend',likes)}catch{}
+ }
+ function home(){const choices=document.querySelector('.hub-choices');if(!choices||document.getElementById('hubRanking'))return;const button=document.createElement('button'),icon=document.createElement('span'),title=document.createElement('strong'),copy=document.createElement('small'),arrow=document.createElement('span');button.type='button';button.id='hubRanking';icon.className='hub-icon';icon.textContent='🏆';title.textContent='Ranking';copy.textContent='Veja os artistas com mais curtidas acumuladas.';arrow.className='hub-arrow';arrow.textContent='Ver Top 10 →';button.append(icon,title,copy,arrow);button.onclick=()=>{location.href='/ranking.html'};choices.append(button)}
+ function run(){if(location.pathname==='/')home();if(location.pathname==='/ranking.html')ranking();if(location.pathname==='/artista.html')profile()}
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',run);else run();
+})();
