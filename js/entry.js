@@ -38,7 +38,7 @@ try{const config=await fetch('/api/auth/config',{cache:'no-store'}).then(r=>r.js
 for(let attempt=0;attempt<40&&!window.google?.accounts?.id;attempt++)await new Promise(r=>setTimeout(r,150));
 if(!window.google?.accounts?.id){message.textContent='Não foi possível carregar o login Google. Continue como visitante.';return}
 google.accounts.id.initialize({client_id:config.clientId,callback:async({credential})=>{try{message.textContent='Salvando seu perfil...';const response=await fetch('/api/auth/google',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({credential})});const result=await response.json();if(!response.ok)throw new Error(result.error||'Não foi possível autenticar');authenticated(result.user,true)}catch(e){message.textContent=e.message||'Falha no login. Tente novamente.'}}});
-google.accounts.id.renderButton(mount,{theme:'outline',size:'large',shape:'pill',text:'continue_with',width:300});
+google.accounts.id.renderButton(mount,{theme:'filled_black',size:'large',shape:'pill',text:'continue_with',width:300});
 }catch{message.textContent='Login temporariamente indisponível. Continue como visitante.'}}
 startGoogle();
 })();
