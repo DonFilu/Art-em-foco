@@ -13,3 +13,9 @@
 .cidio-rank-9{--cidio-rank-gradient:linear-gradient(110deg,#854627,#f4bb86,#ae6338)}
 .cidio-rank-10{--cidio-rank-gradient:linear-gradient(110deg,#768497,#f3f6ff,#9ba9ba)}
 @media(prefers-reduced-motion:no-preference){.cidio-premium-name.cidio-rank-1{background-size:300% 100%!important;animation:cidio-rainbow 5s linear infinite}}@keyframes cidio-rainbow{to{background-position:300% 0}}
+
+/* Full publication frame: shared ranking palette, no overlay on artwork. */
+.cidio-premium-post{border:3px solid transparent!important;background:linear-gradient(#171a23,#171a23) padding-box,var(--cidio-rank-gradient) border-box!important;box-sizing:border-box!important;overflow:hidden}
+@media(prefers-reduced-motion:no-preference){.cidio-premium-post.cidio-rank-1{background:linear-gradient(#171a23,#171a23) padding-box,linear-gradient(var(--cidio-post-angle,100deg),#ff557e,#ffc54d,#54e5a3,#52b9ff,#bf72ff,#ff557e) border-box!important;animation:cidio-post-spectrum 7s linear infinite}}
+@property --cidio-post-angle{syntax:'<angle>';initial-value:100deg;inherits:false}
+@keyframes cidio-post-spectrum{to{--cidio-post-angle:460deg}}
