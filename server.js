@@ -59,7 +59,7 @@ function json(res,status,body,headers={}){res.writeHead(status,{'Content-Type':'
 async function readJSON(req){let data='';for await(const chunk of req){data+=chunk;if(data.length>12000)throw new Error('Requisição muito grande')}return JSON.parse(data)}
 function cookies(req){return Object.fromEntries((req.headers.cookie||'').split(';').map(s=>s.trim().split('=').map(decodeURIComponent)).filter(a=>a.length===2))}
 function cookie(token,maxAge){return 'aef_session='+encodeURIComponent(token||'')+'; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age='+maxAge}
-function safeUser(u){const resolved=avatarInfo(u);return {id:u.artId,name:u.displayName,picture:u.picture||'',email:u.email||'',username:u.username||u.artId.toLowerCase(),bio:u.bio||'',createdAt:u.createdAt,role:u.role||'artist',socials:u.socials||{},avatar:u.avatar||'',cover:u.cover||'',avatarUrl:resolved.avatar,avatarFallback:resolved.avatarFallback,avatarVersion:resolved.avatarVersion}}
+function safeUser(u){const resolved=avatarInfo(u);return {id:u.artId,name:u.displayName,picture:'',email:u.email||'',username:u.username||u.artId.toLowerCase(),bio:u.bio||'',createdAt:u.createdAt,role:u.role||'artist',socials:u.socials||{},avatar:u.avatar||'',cover:u.cover||'',avatarUrl:resolved.avatar,avatarFallback:resolved.avatarFallback,avatarVersion:resolved.avatarVersion}}
 function publicUser(u){return {id:u.artId,username:u.username||u.artId.toLowerCase(),name:u.displayName,bio:u.bio||'',cover:u.cover||'',socials:u.socials||{},...avatarInfo(u)}}
 async function postViews(db,posts,user,artists=new Map()){
  const ids=posts.map(post=>post._id);let liked=new Set();
