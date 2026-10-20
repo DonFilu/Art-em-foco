@@ -19,13 +19,14 @@ async function snapshot(db,id){
  db.collection('art_posts').countDocuments({authorId:id}),
  db.collection('deleted_post_likes').countDocuments({authorId:id})
  ]);
- return {likes:likes?.totalLikes||0,posts:posts+deleted};
+ return {likes:likes?.totalLikes||0,posts,deleted};
 }
 async function calculate(db,id){
- const user=await db.collection('users').findOne({artId:id},{projection:{artId:1,badgesUnlocked:1,badgeMaxLikes:1,badgeMaxPosts:1}});
+ const user=await db.collection('users').findOne({artId:id},{projection:{artId:1,badgesUnlocked:1,badgeMaxLikes:1,badgeMaxPosts:1,badgeDeletedPosts:1}});
  if(!user)return null;
  const stats=await snapshot(db,id);
  const maxLikes=Math.max(stats.likes,user.badgeMaxLikes||0);
+ stats.posts+=Math.max(stats.deleted,user.badgeDeletedPosts||0);
  const maxPosts=Math.max(stats.posts,user.badgeMaxPosts||0);
  const unlocked=new Set(user.badgesUnlocked||[]);
  const privileged={dev:ids('CIDIO_ART_DEV_IDS').has(id),moderator:ids('CIDIO_ART_MODERATOR_IDS').has(id),influencer:ids('CIDIO_ART_INFLUENCER_IDS').has(id)};
