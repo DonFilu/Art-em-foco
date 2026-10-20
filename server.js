@@ -42,9 +42,10 @@ async function canViewArt(db,post,user){
  if(!user)return false;
  return !!await db.collection('friendships').findOne({pair:[user.artId,post.authorId].sort().join(':'),status:'accepted'});
 }
-function privateArtURL(url){
+function privateArtURL(url,feed=false){
  const key=process.env.IMAGEKIT_PRIVATE_KEY;if(!key)throw Error('ImageKit não configurado');
  const u=new URL(url);if(u.protocol!=='https:')throw Error('URL inválida');
+ if(feed)u.searchParams.set('tr','w-1080,q-85');
  const expiry=Math.floor(Date.now()/1000)+45;
  u.searchParams.set('ik-t',String(expiry));
  const parts=u.pathname.split('/').filter(Boolean);const signedPath=u.hostname==='ik.imagekit.io'&&parts.length>1?'/'+parts.slice(1).join('/') :u.pathname;const signature=crypto.createHmac('sha1',key).update(signedPath.replace(/^\//,'')+expiry).digest('hex');
@@ -61,7 +62,7 @@ function publicUser(u){return {id:u.artId,username:u.username||u.artId.toLowerCa
 async function postViews(db,posts,user,artists=new Map()){
  const ids=posts.map(post=>post._id);let liked=new Set();
  if(user&&ids.length){const rows=await db.collection('post_likes').find({userId:user._id,postId:{$in:ids}},{projection:{postId:1}}).toArray();liked=new Set(rows.map(row=>String(row.postId)))}
- return posts.map(post=>({id:post._id.toString(),authorId:post.authorId,artist:artists.get(post.authorId)||null,description:post.description,visibility:post.visibility,createdAt:post.createdAt,image:'/api/art/media/'+post._id.toString(),likeCount:post.likeCount||0,commentCount:post.commentCount||0,likedByViewer:liked.has(String(post._id))}));
+ return posts.map(post=>({id:post._id.toString(),authorId:post.authorId,artist:artists.get(post.authorId)||null,description:post.description,visibility:post.visibility,createdAt:post.createdAt,image:'/api/art/media/'+post._id.toString()+'?size=feed',imageFull:'/api/art/media/'+post._id.toString(),likeCount:post.likeCount||0,commentCount:post.commentCount||0,likedByViewer:liked.has(String(post._id))}));
 }
 
 async function readImageUpload(req){
@@ -278,10 +279,11 @@ if(pathname.startsWith('/api/art/media/')){
   const db=await getDatabase(),post=await db.collection('art_posts').findOne({_id:new ObjectId(id)});
   if(!post)return json(res,404,{error:'Imagem não encontrada'});
   const user=await sessionUser(req);if(!await canViewArt(db,post,user))return json(res,403,{error:'Acesso restrito'});
-  const upstream=await fetch(privateArtURL(post.fileURL),{signal:AbortSignal.timeout(20000),redirect:'error'});
+  const feed=new URL(req.url,'http://localhost').searchParams.get('size')==='feed';
+  const upstream=await fetch(privateArtURL(post.fileURL,feed),{signal:AbortSignal.timeout(20000),redirect:'error'});
   if(!upstream.ok){console.error('ImageKit recusou imagem privada:',upstream.status);return json(res,502,{error:'Imagem indisponível'});}
   const bytes=Buffer.from(await upstream.arrayBuffer());if(bytes.length>ART_MAX+1024)return json(res,502,{error:'Arquivo inválido'});
-  res.writeHead(200,{'Content-Type':post.mime,'Content-Length':bytes.length,'Cache-Control':'private, no-store, max-age=0','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Cross-Origin-Resource-Policy':'same-origin','X-Frame-Options':'DENY'});
+  res.writeHead(200,{'Content-Type':post.mime,'Content-Length':bytes.length,'Cache-Control':post.visibility==='public'?'private, max-age=120, must-revalidate':'private, no-store, max-age=0','Vary':'Cookie','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Cross-Origin-Resource-Policy':'same-origin','X-Frame-Options':'DENY'});
   return res.end(bytes);
  }catch(e){console.error('Falha ao abrir arte:',e.message);return json(res,503,{error:'Não foi possível abrir a arte'})}
 }
