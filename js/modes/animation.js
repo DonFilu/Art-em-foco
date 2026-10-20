@@ -1,0 +1,1 @@
+(()=>{'use strict';window.ArtEmFocoAnimationMode={id:'animation',features:{},sharedEngine:true};})();
