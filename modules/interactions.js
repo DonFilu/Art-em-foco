@@ -2,18 +2,19 @@
 const {ObjectId}=require('mongodb');
 const {avatarInfo}=require('./avatars');
 const MESSAGE_MAX=2000, PAGE_SIZE=20;
-const recentComments=new Map();
+const recentComments=new Map(),recentLikes=new Map();
 let indexesReady;
 const validId=id=>typeof id==='string'&&/^[a-f0-9]{24}$/.test(id);
 const asId=id=>new ObjectId(id);
 function limit(value){return Math.max(1,Math.min(PAGE_SIZE,Number(value)||PAGE_SIZE))}
 function text(value){if(typeof value!=='string')throw Error('Comentário inválido');const clean=value.trim();if(!clean||clean.length>MESSAGE_MAX)throw Error('Escreva uma mensagem de 1 a 2000 caracteres');return clean}
-async function postFor(db,id,user,canViewArt){if(!validId(id))return null;const post=await db.collection('art_posts').findOne({_id:asId(id)});if(!post||!await canViewArt(db,post,user))return null;return post}
+async function postFor(db,id,user,canViewArt){if(!validId(id))return null;const post=await db.collection('art_posts').findOne({_id:asId(id)});if(!post||post.deletingAt||!await canViewArt(db,post,user))return null;return post}
 async function authorMap(db,rows){const ids=[...new Set(rows.map(row=>row.authorId))];const users=ids.length?await db.collection('users').find({artId:{$in:ids}},{projection:{artId:1,displayName:1,username:1,avatar:1,picture:1,avatarDiscord:1,avatarUpdatedAt:1}}).toArray():[];return new Map(users.map(u=>[u.artId,{id:u.artId,name:u.displayName||u.username||u.artId,username:u.username||u.artId.toLowerCase(),...avatarInfo(u)}]))}
 async function serializeComments(db,rows,user){const authors=await authorMap(db,rows);const replyIds=[...new Set(rows.map(row=>row.replyToName).filter(value=>typeof value==='string'&&/^AEF-\d{8,}$/.test(value)))];const replyUsers=replyIds.length?await db.collection('users').find({artId:{$in:replyIds}},{projection:{artId:1,username:1,displayName:1}}).toArray():[];const replyNames=new Map(replyUsers.map(u=>[u.artId,u.username||u.displayName||u.artId]));let liked=new Set();if(user&&rows.length){const likes=await db.collection('comment_likes').find({userId:user._id,commentId:{$in:rows.map(r=>r._id)}},{projection:{commentId:1}}).toArray();liked=new Set(likes.map(l=>String(l.commentId)))}return rows.map(row=>({id:String(row._id),postId:String(row.postId),parentId:row.parentId?String(row.parentId):null,replyToId:row.replyToId?String(row.replyToId):null,replyToName:replyNames.get(row.replyToName)||row.replyToName||null,text:row.text,createdAt:row.createdAt,likesCount:row.likesCount||0,repliesCount:row.repliesCount||0,likedByViewer:liked.has(String(row._id)),author:authors.get(row.authorId)||{id:row.authorId,name:row.authorId,username:row.authorId.toLowerCase(),avatar:''}}))}
 function cursorQuery(cursor){return validId(cursor)?{_id:{$lt:asId(cursor)}}:{}}
 async function listComments(db,post,user,params,parentId=null){const query={postId:post._id,parentId,...cursorQuery(params.get('cursor'))};const rows=await db.collection('art_comments').find(query,{projection:{postId:1,parentId:1,replyToId:1,replyToName:1,authorId:1,text:1,createdAt:1,likesCount:1,repliesCount:1}}).sort({_id:-1}).limit(limit(params.get('limit'))+1).toArray();const more=rows.length>limit(params.get('limit'));if(more)rows.pop();return {comments:await serializeComments(db,rows,user),nextCursor:more?String(rows.at(-1)._id):null}}
 function tooFast(user,postId){const key=user.artId+':'+postId,now=Date.now(),last=recentComments.get(key)||0;if(now-last<900)return true;recentComments.set(key,now);if(recentComments.size>5000){for(const [entry,time] of recentComments){if(now-time>=900)recentComments.delete(entry)}while(recentComments.size>5000)recentComments.delete(recentComments.keys().next().value)}return false}
+function tooManyLikes(user){const now=Date.now(),windowMs=10000,key=user.artId,history=(recentLikes.get(key)||[]).filter(time=>now-time<windowMs);if(history.length>=12){recentLikes.set(key,history);return true}history.push(now);recentLikes.set(key,history);if(recentLikes.size>5000)for(const [entry,times] of recentLikes)if(!times.some(time=>now-time<windowMs))recentLikes.delete(entry);return false}
 async function sendInteraction(db,notifications,recipientArtId,actor,kind,post,commentId){if(!recipientArtId||recipientArtId===actor.artId)return;const recipient=await db.collection('users').findOne({artId:recipientArtId},{projection:{_id:1}});if(recipient)await notifications.interaction(db,{recipient,actor,kind,postId:String(post._id),postAuthorId:post.authorId,commentId});}
 async function postLikesCount(db,postId){return db.collection('art_posts').findOne({_id:postId},{projection:{likeCount:1}}).then(row=>row?.likeCount||0)}
 async function commentLikesCount(db,commentId){return db.collection('art_comments').findOne({_id:commentId},{projection:{likesCount:1}}).then(row=>row?.likesCount||0)}
@@ -34,6 +35,8 @@ async function route(req,res,pathname,{sessionUser,getDatabase,json,canViewArt,n
   if(!postAction){json(res,405,{error:'Método não permitido'});return true}
   if(postAction==='like'){
    if(!requireUser())return true;
+   if(post.authorId===user.artId){json(res,403,{error:'Você não pode curtir sua própria publicação'});return true}
+   if((req.method==='PUT'||req.method==='DELETE')&&tooManyLikes(user)){json(res,429,{error:'Muitas curtidas em pouco tempo. Aguarde alguns segundos.'});return true}
    const likes=db.collection('post_likes');
    if(req.method==='PUT'){
     try{await likes.insertOne({postId:post._id,userId:user._id,createdAt:new Date()});const updated=await db.collection('art_posts').findOneAndUpdate({_id:post._id},{$inc:{likeCount:1}},{returnDocument:'after',projection:{likeCount:1}});await sendInteraction(db,notifications,post.authorId,user,'postLike',post);json(res,201,{liked:true,likesCount:updated?.likeCount??await postLikesCount(db,post._id)})}catch(e){if(e.code===11000){json(res,200,{liked:true,likesCount:await postLikesCount(db,post._id)})}else throw e}return true;

@@ -12,6 +12,7 @@ const {ObjectId}=require('mongodb');
 const notifications=require('./modules/notifications');
 const interactions=require('./modules/interactions');
 const stories=require('./modules/stories');
+const ranking=require('./modules/ranking');
 const {avatarInfo}=require('./modules/avatars');
 const ART_MAX=5*1024*1024;
 async function readArt(req){
@@ -123,6 +124,7 @@ if(pathname==='/api/auth/google'){
 if(await notifications.route(req,res,pathname,{sessionUser,getDatabase,json}))return;
 if(await interactions.route(req,res,pathname,{sessionUser,getDatabase,json,canViewArt,notifications,ensureIndexes}))return;
 if(await stories.route(req,res,pathname,{sessionUser,getDatabase,json}))return;
+if(await ranking.route(req,res,pathname,{sessionUser,getDatabase,json}))return;
 if(pathname==='/api/auth/me'){if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});try{const u=await sessionUser(req);return u?json(res,200,{user:safeUser(u)}):json(res,401,{error:'Sessão não encontrada'})}catch{return json(res,503,{error:'Banco de dados indisponível'})}}
 if(pathname==='/api/auth/logout'){if(req.method!=='POST')return json(res,405,{error:'Método não permitido'});try{const token=cookies(req).aef_session;if(token)await (await getDatabase()).collection('sessions').deleteOne({_id:crypto.createHash('sha256').update(token).digest('hex')});return json(res,200,{ok:true},{'Set-Cookie':cookie('',0)})}catch{return json(res,503,{error:'Não foi possível encerrar a sessão'})}}
 
@@ -230,22 +232,28 @@ if(pathname==='/api/art/publish'){
 if(pathname.startsWith('/api/art/posts/')&&req.method==='DELETE'){
  const id=pathname.slice('/api/art/posts/'.length);
  if(!/^[a-f0-9]{24}$/.test(id))return json(res,400,{error:'Publicação inválida'});
+ let releaseDeletion=null;
  try{
   const user=await sessionUser(req);if(!user)return json(res,401,{error:'Entre na sua conta para excluir publicações'});
   const db=await getDatabase(),collection=db.collection('art_posts');
   const post=await collection.findOne({_id:new ObjectId(id)});
   if(!post)return json(res,404,{error:'Publicação não encontrada'});
   if(post.authorId!==user.artId)return json(res,403,{error:'Somente o criador pode excluir esta publicação'});
-  if(!post.fileId)return json(res,409,{error:'Arquivo da publicação sem identificação no ImageKit. Exclusão interrompida para evitar inconsistências.'});
-  const key=process.env.IMAGEKIT_PRIVATE_KEY;if(!key)return json(res,503,{error:'ImageKit não configurado'});
+  const locked=await collection.updateOne({_id:post._id,authorId:user.artId,deletingAt:{$exists:false}},{$set:{deletingAt:new Date()}});
+  if(!locked.modifiedCount)return json(res,409,{error:'Esta publicação já está sendo excluída'});
+  const unlock=()=>collection.updateOne({_id:post._id,authorId:user.artId},{$unset:{deletingAt:''}}).catch(()=>{});
+  releaseDeletion=unlock;
+  if(!post.fileId){await unlock();return json(res,409,{error:'Arquivo da publicação sem identificação no ImageKit. Exclusão interrompida para evitar inconsistências.'})}
+  const key=process.env.IMAGEKIT_PRIVATE_KEY;if(!key){await unlock();return json(res,503,{error:'ImageKit não configurado'})}
   const response=await fetch('https://api.imagekit.io/v1/files/'+encodeURIComponent(post.fileId),{method:'DELETE',headers:{Authorization:'Basic '+Buffer.from(key+':').toString('base64')},signal:AbortSignal.timeout(20000)});
-  if(!response.ok&&response.status!==404){console.error('Falha ao excluir arquivo no ImageKit:',response.status);return json(res,502,{error:'Não foi possível excluir a imagem no ImageKit. A publicação foi mantida.'})}
-  try{const likesReceived=await db.collection('post_likes').countDocuments({postId:post._id});await db.collection('deleted_post_likes').updateOne({_id:post._id},{$setOnInsert:{authorId:post.authorId,likesReceived,deletedAt:new Date()}},{upsert:true})}catch(e){console.error('Falha ao preservar histórico de curtidas:',e.message);return json(res,503,{error:'Imagem removida, mas o histórico de curtidas não pôde ser salvo. Tente excluir novamente.'})}
-  try{await interactions.cleanupPost(db,post._id)}catch(e){console.error('Falha ao limpar interações da publicação:',e.message);return json(res,503,{error:'Imagem removida, mas as interações ainda não puderam ser limpas. Tente excluir novamente.'})}
+  if(!response.ok&&response.status!==404){await unlock();console.error('Falha ao excluir arquivo no ImageKit:',response.status);return json(res,502,{error:'Não foi possível excluir a imagem no ImageKit. A publicação foi mantida.'})}
+  try{const likesReceived=await db.collection('post_likes').countDocuments({postId:post._id});await db.collection('deleted_post_likes').updateOne({_id:post._id},{$setOnInsert:{authorId:post.authorId,likesReceived,deletedAt:new Date()},$set:{visibility:post.visibility}},{upsert:true})}catch(e){await unlock();console.error('Falha ao preservar histórico de curtidas:',e.message);return json(res,503,{error:'Imagem removida, mas o histórico de curtidas não pôde ser salvo. Tente excluir novamente.'})}
+  try{await interactions.cleanupPost(db,post._id)}catch(e){await unlock();console.error('Falha ao limpar interações da publicação:',e.message);return json(res,503,{error:'Imagem removida, mas as interações ainda não puderam ser limpas. Tente excluir novamente.'})}
   const result=await collection.deleteOne({_id:post._id,authorId:user.artId});
-  if(!result.deletedCount)return json(res,503,{error:'Imagem e interações removidas, mas não foi possível remover o registro. Tente novamente.'});
+  if(!result.deletedCount){await unlock();return json(res,503,{error:'Imagem e interações removidas, mas não foi possível remover o registro. Tente novamente.'})}
+  releaseDeletion=null;
   return json(res,200,{ok:true});
- }catch(e){console.error('Falha ao excluir publicação:',e.message);return json(res,503,{error:'Falha ao excluir publicação. Tente novamente.'})}
+ }catch(e){await releaseDeletion?.();console.error('Falha ao excluir publicação:',e.message);return json(res,503,{error:'Falha ao excluir publicação. Tente novamente.'})}
 }
 if(pathname==='/api/art/feed'){
  if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});
@@ -293,9 +301,10 @@ if(pathname==='/')pathname='/index.html';
 if(pathname==='/politica-de-privacidade'||pathname==='/política-de-privacidade')pathname='/politica-de-privacidade.html';
 if(pathname==='/termos-de-uso')pathname='/termos-de-uso.html';
 if(pathname==='/configuracoes'||pathname==='/configurações')pathname='/configuracoes.html';
+if(pathname==='/ranking')pathname='/ranking.html';
 if(['/db.js','/server.js','/package.json','/package-lock.json'].includes(pathname)||pathname.startsWith('/.')){res.writeHead(404);return res.end('Não encontrado')}
 const file=path.resolve(root,'.'+pathname);if(file!==root&&!file.startsWith(root+path.sep)){res.writeHead(403);return res.end('Acesso negado')}
-fs.readFile(file,(err,data)=>{if(err){res.writeHead(err.code==='ENOENT'?404:500);return res.end('Arquivo indisponível')}const type=mime[path.extname(file)]||'application/octet-stream';if(type.startsWith('text/html'))data=Buffer.from(data.toString('utf8').replace('</head>','<link rel="stylesheet" href="/css/stories.css"><script defer src="/js/avatar.js"></script><script defer src="/js/stories.js"></script></head>'));res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff'});res.end(data)})
+fs.readFile(file,(err,data)=>{if(err){res.writeHead(err.code==='ENOENT'?404:500);return res.end('Arquivo indisponível')}const type=mime[path.extname(file)]||'application/octet-stream';if(type.startsWith('text/html'))data=Buffer.from(data.toString('utf8').replace('</head>','<link rel="stylesheet" href="/css/stories.css"><link rel="stylesheet" href="/css/ranking.css"><script defer src="/js/avatar.js"></script><script defer src="/js/stories.js"></script><script defer src="/js/ranking.js"></script></head>'));res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff'});res.end(data)})
 }).listen(port,'0.0.0.0',()=>console.log('Art em Foco online na porta '+port));
 
 setInterval(()=>getDatabase().then(stories.maintenance).catch(()=>{}),60000).unref();
