@@ -1,6 +1,8 @@
 /* Rank-specific presentation; aura slot reserved for future visual effects. */
 .cidio-premium-name{display:inline-block;font-weight:750!important;background:var(--cidio-rank-gradient)!important;background-clip:text!important;-webkit-background-clip:text!important;color:transparent!important;-webkit-text-fill-color:transparent!important}
-.cidio-premium-avatar{position:relative!important;isolation:isolate;border:3px solid transparent!important;background:linear-gradient(#161922,#161922) padding-box,var(--cidio-rank-gradient) border-box!important;border-radius:50%!important;box-sizing:border-box!important}
+.cidio-premium-avatar{position:relative!important;isolation:isolate;border-radius:50%!important;box-sizing:border-box!important;outline:3px solid transparent!important;outline-offset:1px;box-shadow:0 0 0 3px #171a23!important}
+.cidio-premium-avatar::after{content:'';position:absolute;inset:-5px;border:3px solid transparent;border-radius:inherit;background:var(--cidio-rank-gradient) border-box;-webkit-mask:linear-gradient(#fff 0 0) padding-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#fff 0 0) padding-box,linear-gradient(#fff 0 0);mask-composite:exclude;pointer-events:none;z-index:3}
+#artistAvatar.cidio-premium-avatar{background-size:cover!important;background-position:center!important}
 .cidio-premium-avatar img{border-radius:50%!important}
 .cidio-rank-1{--cidio-rank-gradient:linear-gradient(100deg,#ff557e,#ffc54d,#54e5a3,#52b9ff,#bf72ff,#ff557e)}
 .cidio-rank-2{--cidio-rank-gradient:linear-gradient(110deg,#5aa8ff,#f0fdff,#7896ff)}
