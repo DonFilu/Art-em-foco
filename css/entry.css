@@ -6,3 +6,6 @@
 /* Identidade visual da entrada */
 .entry-card .entry-logo{display:block;width:min(74%,230px);height:auto;max-height:230px;object-fit:contain;margin:0 auto 14px;filter:drop-shadow(0 12px 25px #0005)}
 @media(max-width:480px){.entry-card .entry-logo{width:min(70%,190px);max-height:190px}.entry-card{padding-top:28px;padding-bottom:28px}}
+
+/* Cartão de entrada: contraste suave e mais luminosidade */
+.entry-card{background:linear-gradient(155deg,rgba(49,47,75,.96),rgba(37,39,62,.97));border-color:rgba(193,180,255,.24);box-shadow:0 28px 85px #0006, inset 0 1px 0 #ffffff0b}
