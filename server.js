@@ -251,9 +251,9 @@ if(pathname.startsWith('/api/art/posts/')&&req.method==='DELETE'){
   if(!response.ok&&response.status!==404){await unlock();console.error('Falha ao excluir arquivo no ImageKit:',response.status);return json(res,502,{error:'Não foi possível excluir a imagem no ImageKit. A publicação foi mantida.'})}
   try{const likesReceived=await db.collection('post_likes').countDocuments({postId:post._id});await db.collection('deleted_post_likes').updateOne({_id:post._id},{$setOnInsert:{authorId:post.authorId,likesReceived,deletedAt:new Date()},$set:{visibility:post.visibility}},{upsert:true})}catch(e){await unlock();console.error('Falha ao preservar histórico de curtidas:',e.message);return json(res,503,{error:'Imagem removida, mas o histórico de curtidas não pôde ser salvo. Tente excluir novamente.'})}
   try{await interactions.cleanupPost(db,post._id)}catch(e){await unlock();console.error('Falha ao limpar interações da publicação:',e.message);return json(res,503,{error:'Imagem removida, mas as interações ainda não puderam ser limpas. Tente excluir novamente.'})}
-  await db.collection('users').updateOne({artId:user.artId},{$inc:{badgeDeletedPosts:1}});
   const result=await collection.deleteOne({_id:post._id,authorId:user.artId});
   if(!result.deletedCount){await unlock();return json(res,503,{error:'Imagem e interações removidas, mas não foi possível remover o registro. Tente novamente.'})}
+  await db.collection('users').updateOne({artId:user.artId},{$inc:{badgeDeletedPosts:1}}).catch(e=>console.error('Histórico de insígnias:',e.message));
   releaseDeletion=null;
   return json(res,200,{ok:true});
  }catch(e){await releaseDeletion?.();console.error('Falha ao excluir publicação:',e.message);return json(res,503,{error:'Falha ao excluir publicação. Tente novamente.'})}
