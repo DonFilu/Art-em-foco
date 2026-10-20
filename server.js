@@ -104,7 +104,7 @@ async function ensureIndexes(db){await Promise.all([db.collection('users').creat
 async function addWelcomeFriends(db,newArtistId){
  // These are the official welcome accounts; override with CIDIO_ART_WELCOME_FRIEND_IDS if needed.
  const configured=process.env.CIDIO_ART_WELCOME_FRIEND_IDS;
- const ids=[...new Set((configured===undefined?'AEF-00000003,AEF-00000005':configured).split(/[;,\\s]+/).map(x=>x.trim()).filter(x=>/^AEF-\\d{8,}$/.test(x)&&x!==newArtistId))];
+ const ids=[...new Set((configured===undefined?'AEF-00000003,AEF-00000005':configured).split(/[;,\s]+/).map(x=>x.trim()).filter(x=>/^AEF-\d{8,}$/.test(x)&&x!==newArtistId))];
  if(!ids.length)return;
  const existing=await db.collection('users').find({artId:{$in:ids}},{projection:{artId:1}}).toArray();
  for(const target of existing){
