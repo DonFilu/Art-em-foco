@@ -5,6 +5,7 @@ const test=require('node:test');
 const server=fs.readFileSync('server.js','utf8');
 const publisher=fs.readFileSync('js/publication-formats.js','utf8');
 const reader=fs.readFileSync('js/book-reader.js','utf8');
+const privacy=fs.readFileSync('js/publication-format-privacy.js','utf8');
 
 test('book publications are bounded, private and retain a cover compatible with old posts',()=>{
  assert.match(server,/BOOK_PAGE_LIMIT=12/);
@@ -26,4 +27,10 @@ test('the reader supports direction, swipe, controls and reduced motion',()=>{
  assert.match(reader,/onpointerdown/);
  assert.match(reader,/prefers-reduced-motion/);
  assert.match(reader,/pages\//);
+});
+
+test('format publications retain description and privacy choices',()=>{
+ assert.match(privacy,/aef-format-visibility/);
+ assert.match(privacy,/body\.visibility/);
+ assert.match(privacy,/body\.description/);
 });
