@@ -16,17 +16,15 @@ const ranking=require('./modules/ranking');
 const badges=require('./modules/badges');
 const {avatarInfo}=require('./modules/avatars');
 const ART_MAX=5*1024*1024;
+const BOOK_PAGE_MAX=3*1024*1024,BOOK_PAGE_LIMIT=12,BOOK_TOTAL_MAX=18*1024*1024,BOOK_UPLOAD_MAX=24*1024*1024;
+function imagePayload(value,max=ART_MAX){const match=typeof value==='string'&&/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(value);if(!match)throw Error('Formato de imagem inválido');const buffer=Buffer.from(match[2],'base64'),mime=match[1];if(!buffer.length||buffer.length>max)throw Error('Arquivo muito grande');const valid=mime==='image/png'?buffer.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')):mime==='image/jpeg'?buffer[0]===255&&buffer[1]===216&&buffer[2]===255:mime==='image/webp'?buffer.toString('ascii',0,4)==='RIFF'&&buffer.toString('ascii',8,12)==='WEBP':buffer.toString('ascii',0,3)==='GIF';if(!valid)throw Error('Arquivo de imagem inválido');return {buffer,mime,extension:mime.split('/')[1].replace('jpeg','jpg')}}
 async function readArt(req){
- const chunks=[];let size=0;for await(const part of req){size+=part.length;if(size>7*1024*1024)throw Error('Arquivo muito grande');chunks.push(part)}
+ const chunks=[];let size=0;for await(const part of req){size+=part.length;if(size>BOOK_UPLOAD_MAX)throw Error('Arquivo muito grande');chunks.push(part)}
  const data=JSON.parse(Buffer.concat(chunks).toString('utf8'));
  if(typeof data.description!=='string'||data.description.length>1000||!['public','friends'].includes(data.visibility)||typeof data.image!=='string')throw Error('Dados de publicação inválidos');
- const match=/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(data.image);
- if(!match)throw Error('Formato de imagem inválido');
- const buffer=Buffer.from(match[2],'base64'),mime=match[1];
- if(!buffer.length||buffer.length>ART_MAX)throw Error('Arquivo muito grande (máximo 5 MB)');
- const valid=mime==='image/png'?buffer.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')):mime==='image/jpeg'?buffer[0]===255&&buffer[1]===216&&buffer[2]===255:mime==='image/webp'?buffer.toString('ascii',0,4)==='RIFF'&&buffer.toString('ascii',8,12)==='WEBP':buffer.toString('ascii',0,3)==='GIF';
- if(!valid)throw Error('Arquivo de imagem inválido');
- return {buffer,mime,referenceUsed:data.referenceUsed===true,description:data.description.trim(),visibility:data.visibility,extension:mime.split('/')[1].replace('jpeg','jpg')};
+ const cover=imagePayload(data.image),publicationType=['image','animation-image','animation-gif','hq','manga'].includes(data.publicationType)?data.publicationType:'image';let pages=[];
+ if(publicationType==='hq'||publicationType==='manga'){if(!Array.isArray(data.pages)||data.pages.length<1||data.pages.length>BOOK_PAGE_LIMIT)throw Error('Selecione de 1 a '+BOOK_PAGE_LIMIT+' páginas');pages=data.pages.map(page=>imagePayload(page,BOOK_PAGE_MAX));if(pages.some(page=>page.mime==='image/gif'))throw Error('Páginas de HQ e Mangá devem ser imagens estáticas');if(pages.reduce((total,page)=>total+page.buffer.length,0)>BOOK_TOTAL_MAX)throw Error('Livro muito grande');if(!pages[0].buffer.equals(cover.buffer))throw Error('A capa deve ser a primeira página selecionada')}
+ return {...cover,pages,publicationType,referenceUsed:data.referenceUsed===true,description:data.description.trim(),visibility:data.visibility};
 }
 async function uploadPrivateArt(art,user){
  const key=process.env.IMAGEKIT_PRIVATE_KEY;if(!key)throw Error('ImageKit não configurado');
@@ -39,6 +37,8 @@ async function uploadPrivateArt(art,user){
  if(!response.ok||!result.fileId||!result.url)throw Error('Falha no armazenamento da publicação ('+response.status+')');
  return {fileId:result.fileId,url:result.url};
 }
+async function removePrivateArt(fileId){const key=process.env.IMAGEKIT_PRIVATE_KEY;if(!key||!fileId)return;const response=await fetch('https://api.imagekit.io/v1/files/'+encodeURIComponent(fileId),{method:'DELETE',headers:{Authorization:'Basic '+Buffer.from(key+':').toString('base64')},signal:AbortSignal.timeout(20000)});if(!response.ok&&response.status!==404)throw Error('Falha ao limpar arquivo enviado')}
+async function uploadBookPages(pages,user){const uploaded=[];try{for(const page of pages)uploaded.push(await uploadPrivateArt(page,user));return uploaded}catch(error){await Promise.allSettled(uploaded.map(file=>removePrivateArt(file.fileId)));throw error}}
 async function canViewArt(db,post,user){
  if(post.visibility==='public'||user?.artId===post.authorId)return true;
  if(!user)return false;
@@ -64,7 +64,7 @@ function publicUser(u){return {id:u.artId,username:u.username||u.artId.toLowerCa
 async function postViews(db,posts,user,artists=new Map()){
  const ids=posts.map(post=>post._id);let liked=new Set();
  if(user&&ids.length){const rows=await db.collection('post_likes').find({userId:user._id,postId:{$in:ids}},{projection:{postId:1}}).toArray();liked=new Set(rows.map(row=>String(row.postId)))}
- return posts.map(post=>({id:post._id.toString(),authorId:post.authorId,artist:artists.get(post.authorId)||null,description:post.description,visibility:post.visibility,referenceUsed:post.referenceUsed===true,createdAt:post.createdAt,image:'/api/art/media/'+post._id.toString()+'?size=feed',imageFull:'/api/art/media/'+post._id.toString(),likeCount:post.likeCount||0,commentCount:post.commentCount||0,likedByViewer:liked.has(String(post._id))}));
+ return posts.map(post=>({id:post._id.toString(),authorId:post.authorId,artist:artists.get(post.authorId)||null,description:post.description,visibility:post.visibility,publicationType:post.publicationType||'image',pageCount:Array.isArray(post.pages)?post.pages.length:0,referenceUsed:post.referenceUsed===true,createdAt:post.createdAt,image:'/api/art/media/'+post._id.toString()+'?size=feed',imageFull:'/api/art/media/'+post._id.toString(),likeCount:post.likeCount||0,commentCount:post.commentCount||0,likedByViewer:liked.has(String(post._id))}));
 }
 
 async function readImageUpload(req){
@@ -259,9 +259,7 @@ if(pathname==='/api/art/publish'){
   const db=await getDatabase();
   const recent=await db.collection('art_posts').countDocuments({authorId:user.artId,createdAt:{$gte:new Date(Date.now()-3600000)}});
   if(recent>=10)return json(res,429,{error:'Limite de 10 publicações por hora'});
-  const art=await readArt(req),uploaded=await uploadPrivateArt(art,user);
-  const result=await db.collection('art_posts').insertOne({authorId:user.artId,description:art.description,visibility:art.visibility,referenceUsed:art.referenceUsed,mime:art.mime,fileId:uploaded.fileId,fileURL:uploaded.url,likeCount:0,commentCount:0,createdAt:new Date()});
-  return json(res,201,{ok:true,id:result.insertedId.toString()});
+  const art=await readArt(req);let uploaded=[],bookPages=[];try{if(art.pages.length){bookPages=await uploadBookPages(art.pages,user);uploaded=bookPages}else uploaded=[await uploadPrivateArt(art,user)];const cover=uploaded[0];const result=await db.collection('art_posts').insertOne({authorId:user.artId,description:art.description,visibility:art.visibility,publicationType:art.publicationType,referenceUsed:art.referenceUsed,mime:cover.mime||art.mime,fileId:cover.fileId,fileURL:cover.url,pages:bookPages.map((file,index)=>({fileId:file.fileId,fileURL:file.url,mime:art.pages[index].mime})),likeCount:0,commentCount:0,createdAt:new Date()});return json(res,201,{ok:true,id:result.insertedId.toString()})}catch(error){await Promise.allSettled(uploaded.map(file=>removePrivateArt(file.fileId)));throw error}
  }catch(e){console.error('Falha ao publicar arte:',e.message);return json(res,/inválid|grande|limite/i.test(e.message)?400:503,{error:e.message||'Falha ao publicar'})}
 }
 if(pathname.startsWith('/api/art/posts/')&&req.method==='DELETE'){
@@ -279,9 +277,8 @@ if(pathname.startsWith('/api/art/posts/')&&req.method==='DELETE'){
   const unlock=()=>collection.updateOne({_id:post._id,authorId:user.artId},{$unset:{deletingAt:''}}).catch(()=>{});
   releaseDeletion=unlock;
   if(!post.fileId){await unlock();return json(res,409,{error:'Arquivo da publicação sem identificação no ImageKit. Exclusão interrompida para evitar inconsistências.'})}
-  const key=process.env.IMAGEKIT_PRIVATE_KEY;if(!key){await unlock();return json(res,503,{error:'ImageKit não configurado'})}
-  const response=await fetch('https://api.imagekit.io/v1/files/'+encodeURIComponent(post.fileId),{method:'DELETE',headers:{Authorization:'Basic '+Buffer.from(key+':').toString('base64')},signal:AbortSignal.timeout(20000)});
-  if(!response.ok&&response.status!==404){await unlock();console.error('Falha ao excluir arquivo no ImageKit:',response.status);return json(res,502,{error:'Não foi possível excluir a imagem no ImageKit. A publicação foi mantida.'})}
+  const files=[post.fileId,...(Array.isArray(post.pages)?post.pages.map(page=>page.fileId):[])].filter((file,index,list)=>file&&list.indexOf(file)===index);
+  try{for(const file of files)await removePrivateArt(file)}catch(error){await unlock();console.error('Falha ao excluir arquivo no ImageKit:',error.message);return json(res,502,{error:'Não foi possível excluir todos os arquivos. A publicação foi mantida para nova tentativa.'})}
   try{const likesReceived=await db.collection('post_likes').countDocuments({postId:post._id});await db.collection('deleted_post_likes').updateOne({_id:post._id},{$setOnInsert:{authorId:post.authorId,likesReceived,deletedAt:new Date()},$set:{visibility:post.visibility}},{upsert:true})}catch(e){await unlock();console.error('Falha ao preservar histórico de curtidas:',e.message);return json(res,503,{error:'Imagem removida, mas o histórico de curtidas não pôde ser salvo. Tente excluir novamente.'})}
   try{await interactions.cleanupPost(db,post._id)}catch(e){await unlock();console.error('Falha ao limpar interações da publicação:',e.message);return json(res,503,{error:'Imagem removida, mas as interações ainda não puderam ser limpas. Tente excluir novamente.'})}
   const result=await collection.deleteOne({_id:post._id,authorId:user.artId});
@@ -316,6 +313,11 @@ if(pathname==='/api/art/posts'){
   return json(res,200,{posts:await postViews(db,allowed,user)});
  }catch{return json(res,503,{error:'Não foi possível carregar publicações'})}
 }
+const bookPageMatch=/^\/api\/art\/posts\/([a-f0-9]{24})\/pages\/(\d+)$/.exec(pathname);
+if(bookPageMatch){
+ if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});
+ try{const db=await getDatabase(),post=await db.collection('art_posts').findOne({_id:new ObjectId(bookPageMatch[1])}),index=Number(bookPageMatch[2]),page=post?.pages?.[index];if(!post||!page)return json(res,404,{error:'Página não encontrada'});const user=await sessionUser(req);if(!await canViewArt(db,post,user))return json(res,403,{error:'Acesso restrito'});const upstream=await fetch(privateArtURL(page.fileURL),{signal:AbortSignal.timeout(20000),redirect:'error'});if(!upstream.ok)return json(res,502,{error:'Página indisponível'});const bytes=Buffer.from(await upstream.arrayBuffer());if(bytes.length>BOOK_PAGE_MAX+1024)return json(res,502,{error:'Arquivo inválido'});res.writeHead(200,{'Content-Type':page.mime||'image/png','Content-Length':bytes.length,'Cache-Control':'private, no-store, max-age=0','Vary':'Cookie','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Cross-Origin-Resource-Policy':'same-origin','X-Frame-Options':'DENY'});return res.end(bytes)}catch(e){console.error('Falha ao abrir página:',e.message);return json(res,503,{error:'Não foi possível abrir a página'})}
+}
 if(pathname.startsWith('/api/art/media/')){
  if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});
  const id=pathname.slice('/api/art/media/'.length);if(!/^[a-f0-9]{24}$/.test(id))return json(res,404,{error:'Imagem não encontrada'});
@@ -340,7 +342,7 @@ if(pathname==='/configuracoes'||pathname==='/configurações')pathname='/configu
 if(pathname==='/ranking')pathname='/ranking.html';
 if(['/db.js','/server.js','/package.json','/package-lock.json'].includes(pathname)||pathname.startsWith('/.')){res.writeHead(404);return res.end('Não encontrado')}
 const file=path.resolve(root,'.'+pathname);if(file!==root&&!file.startsWith(root+path.sep)){res.writeHead(403);return res.end('Acesso negado')}
-fs.readFile(file,(err,data)=>{if(err){res.writeHead(err.code==='ENOENT'?404:500);return res.end('Arquivo indisponível')}const type=mime[path.extname(file)]||'application/octet-stream';if(type.startsWith('text/html'))data=Buffer.from(data.toString('utf8').replace('</head>','<link rel="stylesheet" href="/css/stories.css"><link rel="stylesheet" href="/css/ranking.css"><script defer src="/js/avatar.js"></script><script defer src="/js/stories.js"></script><script defer src="/js/ranking.js"></script><link rel="stylesheet" href="/css/prestige.css"><script defer src="/js/prestige.js"></script></head>'));res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff'});res.end(data)})
+fs.readFile(file,(err,data)=>{if(err){res.writeHead(err.code==='ENOENT'?404:500);return res.end('Arquivo indisponível')}const type=mime[path.extname(file)]||'application/octet-stream';if(type.startsWith('text/html'))data=Buffer.from(data.toString('utf8').replace('</head>','<link rel="stylesheet" href="/css/stories.css"><link rel="stylesheet" href="/css/ranking.css"><link rel="stylesheet" href="/css/book-reader.css"><link rel="stylesheet" href="/css/publication-formats.css"><script defer src="/js/avatar.js"></script><script defer src="/js/stories.js"></script><script defer src="/js/ranking.js"></script><script defer src="/js/book-reader.js"></script><script defer src="/js/publication-formats.js"></script><link rel="stylesheet" href="/css/prestige.css"><script defer src="/js/prestige.js"></script></head>'));res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff'});res.end(data)})
 }).listen(port,'0.0.0.0',()=>console.log('Art em Foco online na porta '+port));
 
 setInterval(()=>getDatabase().then(stories.maintenance).catch(()=>{}),60000).unref();
