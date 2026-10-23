@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Cidio Art | Gestão</title>
+  <link rel="stylesheet" href="/css/base.css">
+  <link rel="stylesheet" href="/css/gestao.css">
+  <script defer src="/js/gestao.js"></script>
+</head>
+<body class="gestao-page">
+  <main class="gestao-shell" aria-live="polite">
+    <header class="gestao-header">
+      <div><p class="gestao-kicker">Cidio Sistemas</p><h1>Cidio Art <span>| Gestão</span></h1></div>
+      <button id="gestaoLogout" class="gestao-secondary" type="button" hidden>Encerrar sessão</button>
+    </header>
+
+    <section id="gestaoGate" class="gestao-card gestao-gate">
+      <p class="gestao-kicker">Área restrita</p>
+      <h2>Autenticação administrativa</h2>
+      <p id="gestaoGateMessage">Verificando a sua sessão Cidio Art…</p>
+      <form id="gestaoLogin" hidden>
+        <label for="gestaoPassword">Senha administrativa</label>
+        <input id="gestaoPassword" name="password" type="password" autocomplete="current-password" minlength="12" maxlength="200" required>
+        <button class="gestao-primary" type="submit">Acessar Gestão</button>
+        <p class="gestao-hint">A sua conta Google autorizada e a senha administrativa são necessárias.</p>
+      </form>
+    </section>
+
+    <section id="gestaoApp" hidden>
+      <nav class="gestao-nav" aria-label="Navegação do Gestão">
+        <button class="gestao-nav-active" type="button" data-gestao-view="reports">Relatórios</button>
+      </nav>
+      <section class="gestao-card">
+        <div class="gestao-section-heading"><div><p class="gestao-kicker">Visão geral</p><h2>Relatórios</h2></div><button id="gestaoRefresh" class="gestao-secondary" type="button">Atualizar</button></div>
+        <div id="gestaoTotals" class="gestao-totals" aria-busy="true"></div>
+      </section>
+      <section class="gestao-card">
+        <div class="gestao-section-heading"><div><p class="gestao-kicker">Contas cadastradas</p><h2>Usuários</h2></div></div>
+        <form id="gestaoSearch" class="gestao-search">
+          <label class="sr-only" for="gestaoQuery">Pesquisar artistas</label>
+          <input id="gestaoQuery" type="search" maxlength="50" placeholder="Pesquisar por nome, @usuário ou AEF">
+          <button class="gestao-primary" type="submit">Pesquisar</button>
+        </form>
+        <div class="gestao-table-wrap"><table><thead><tr><th>Artista</th><th>ID AEF</th><th>Usuário</th><th>Publicações</th><th>Curtidas recebidas</th><th>Conta Google</th></tr></thead><tbody id="gestaoUsers"></tbody></table></div>
+        <div class="gestao-pagination"><button id="gestaoMore" class="gestao-secondary" type="button" hidden>Carregar mais</button><p id="gestaoUsersStatus"></p></div>
+      </section>
+    </section>
+  </main>
+  <dialog id="gestaoEmailDialog" class="gestao-dialog"><form id="gestaoEmailForm" method="dialog"><h2>Confirmar acesso ao e-mail</h2><p>Informe novamente a senha administrativa para revelar somente o e-mail solicitado.</p><label for="gestaoEmailPassword">Senha administrativa</label><input id="gestaoEmailPassword" type="password" autocomplete="current-password" minlength="12" maxlength="200" required><div><button id="gestaoEmailCancel" class="gestao-secondary" type="button">Cancelar</button><button class="gestao-primary" type="submit">Confirmar</button></div><p id="gestaoEmailError" role="alert"></p></form></dialog>
+</body>
+</html>
