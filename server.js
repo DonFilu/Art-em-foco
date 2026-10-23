@@ -16,6 +16,10 @@ const ranking=require('./modules/ranking');
 const badges=require('./modules/badges');
 const {avatarInfo}=require('./modules/avatars');
 const ART_MAX=5*1024*1024;
+// Cache apenas de artes públicas: reduz leituras repetidas no ImageKit sem armazenar obras privadas.
+const publicArtCache=new Map();let publicArtCacheBytes=0;const PUBLIC_ART_CACHE_MAX=48*1024*1024,PUBLIC_ART_CACHE_TTL=5*60*1000;
+function cachedPublicArt(key){const item=publicArtCache.get(key);if(!item)return null;if(item.expires<Date.now()){publicArtCache.delete(key);publicArtCacheBytes-=item.bytes.length;return null}publicArtCache.delete(key);publicArtCache.set(key,item);return item.bytes}
+function savePublicArt(key,bytes){if(bytes.length>PUBLIC_ART_CACHE_MAX/4)return;const old=publicArtCache.get(key);if(old){publicArtCacheBytes-=old.bytes.length;publicArtCache.delete(key)}publicArtCache.set(key,{bytes,expires:Date.now()+PUBLIC_ART_CACHE_TTL});publicArtCacheBytes+=bytes.length;while(publicArtCacheBytes>PUBLIC_ART_CACHE_MAX){const oldest=publicArtCache.keys().next().value;if(!oldest)break;publicArtCacheBytes-=publicArtCache.get(oldest).bytes.length;publicArtCache.delete(oldest)}}
 const BOOK_PAGE_MAX=3*1024*1024,BOOK_PAGE_LIMIT=12,BOOK_TOTAL_MAX=18*1024*1024,BOOK_UPLOAD_MAX=24*1024*1024;
 function imagePayload(value,max=ART_MAX){const match=typeof value==='string'&&/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(value);if(!match)throw Error('Formato de imagem inválido');const buffer=Buffer.from(match[2],'base64'),mime=match[1];if(!buffer.length||buffer.length>max)throw Error('Arquivo muito grande');const valid=mime==='image/png'?buffer.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')):mime==='image/jpeg'?buffer[0]===255&&buffer[1]===216&&buffer[2]===255:mime==='image/webp'?buffer.toString('ascii',0,4)==='RIFF'&&buffer.toString('ascii',8,12)==='WEBP':buffer.toString('ascii',0,3)==='GIF';if(!valid)throw Error('Arquivo de imagem inválido');return {buffer,mime,extension:mime.split('/')[1].replace('jpeg','jpg')}}
 async function readArt(req){
@@ -326,10 +330,15 @@ if(pathname.startsWith('/api/art/media/')){
   if(!post)return json(res,404,{error:'Imagem não encontrada'});
   const user=await sessionUser(req);if(!await canViewArt(db,post,user))return json(res,403,{error:'Acesso restrito'});
   const feed=new URL(req.url,'http://localhost').searchParams.get('size')==='feed';
-  const upstream=await fetch(privateArtURL(post.fileURL,feed && post.mime!=='image/gif'),{signal:AbortSignal.timeout(20000),redirect:'error'});
-  if(!upstream.ok){console.error('ImageKit recusou imagem privada:',upstream.status);return json(res,502,{error:'Imagem indisponível'});}
-  const bytes=Buffer.from(await upstream.arrayBuffer());if(bytes.length>ART_MAX+1024)return json(res,502,{error:'Arquivo inválido'});
-  res.writeHead(200,{'Content-Type':post.mime,'Content-Length':bytes.length,'Cache-Control':post.visibility==='public'?'private, max-age=120, must-revalidate':'private, no-store, max-age=0','Vary':'Cookie','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Cross-Origin-Resource-Policy':'same-origin','X-Frame-Options':'DENY'});
+  const publicPost=post.visibility==='public',cacheKey=id+':'+(feed?'feed':'full');
+  let bytes=publicPost?cachedPublicArt(cacheKey):null;
+  if(!bytes){
+   const upstream=await fetch(privateArtURL(post.fileURL,feed && post.mime!=='image/gif'),{signal:AbortSignal.timeout(20000),redirect:'error'});
+   if(!upstream.ok){console.error('ImageKit recusou imagem privada:',upstream.status);return json(res,502,{error:'Imagem indisponível'});}
+   bytes=Buffer.from(await upstream.arrayBuffer());if(bytes.length>ART_MAX+1024)return json(res,502,{error:'Arquivo inválido'});
+   if(publicPost)savePublicArt(cacheKey,bytes);
+  }
+  res.writeHead(200,{'Content-Type':post.mime,'Content-Length':bytes.length,'Cache-Control':publicPost?'private, max-age=600':'private, no-store, max-age=0','Vary':'Cookie','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Cross-Origin-Resource-Policy':'same-origin','X-Frame-Options':'DENY'});
   return res.end(bytes);
  }catch(e){console.error('Falha ao abrir arte:',e.message);return json(res,503,{error:'Não foi possível abrir a arte'})}
 }
