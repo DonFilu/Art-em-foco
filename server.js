@@ -326,7 +326,7 @@ if(pathname.startsWith('/api/art/media/')){
   if(!post)return json(res,404,{error:'Imagem não encontrada'});
   const user=await sessionUser(req);if(!await canViewArt(db,post,user))return json(res,403,{error:'Acesso restrito'});
   const feed=new URL(req.url,'http://localhost').searchParams.get('size')==='feed';
-  const upstream=await fetch(privateArtURL(post.fileURL,feed),{signal:AbortSignal.timeout(20000),redirect:'error'});
+  const upstream=await fetch(privateArtURL(post.fileURL,feed && post.mime!=='image/gif'),{signal:AbortSignal.timeout(20000),redirect:'error'});
   if(!upstream.ok){console.error('ImageKit recusou imagem privada:',upstream.status);return json(res,502,{error:'Imagem indisponível'});}
   const bytes=Buffer.from(await upstream.arrayBuffer());if(bytes.length>ART_MAX+1024)return json(res,502,{error:'Arquivo inválido'});
   res.writeHead(200,{'Content-Type':post.mime,'Content-Length':bytes.length,'Cache-Control':post.visibility==='public'?'private, max-age=120, must-revalidate':'private, no-store, max-age=0','Vary':'Cookie','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Cross-Origin-Resource-Policy':'same-origin','X-Frame-Options':'DENY'});
