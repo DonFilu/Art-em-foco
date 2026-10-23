@@ -14,6 +14,7 @@ const interactions=require('./modules/interactions');
 const stories=require('./modules/stories');
 const ranking=require('./modules/ranking');
 const badges=require('./modules/badges');
+const gestao=require('./modules/gestao');
 const {avatarInfo}=require('./modules/avatars');
 const ART_MAX=5*1024*1024;
 // Cache apenas de artes públicas: reduz leituras repetidas no ImageKit sem armazenar obras privadas.
@@ -165,6 +166,7 @@ if(await interactions.route(req,res,pathname,{sessionUser,getDatabase,json,canVi
 if(await stories.route(req,res,pathname,{sessionUser,getDatabase,json}))return;
 if(await ranking.route(req,res,pathname,{sessionUser,getDatabase,json}))return;
 if(await badges.route(req,res,pathname,{sessionUser,getDatabase,json}))return;
+if(await gestao.route(req,res,pathname,{sessionUser,getDatabase,json,readJSON}))return;
 if(pathname==='/api/auth/me'){if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});try{const u=await sessionUser(req);return u?json(res,200,{user:safeUser(u)}):json(res,401,{error:'Sessão não encontrada'})}catch{return json(res,503,{error:'Banco de dados indisponível'})}}
 if(pathname==='/api/auth/logout'){if(req.method!=='POST')return json(res,405,{error:'Método não permitido'});try{const token=cookies(req).aef_session;if(token)await (await getDatabase()).collection('sessions').deleteOne({_id:crypto.createHash('sha256').update(token).digest('hex')});return json(res,200,{ok:true},{'Set-Cookie':cookie('',0)})}catch{return json(res,503,{error:'Não foi possível encerrar a sessão'})}}
 
@@ -359,9 +361,10 @@ if(pathname==='/politica-de-privacidade'||pathname==='/política-de-privacidade'
 if(pathname==='/termos-de-uso')pathname='/termos-de-uso.html';
 if(pathname==='/configuracoes'||pathname==='/configurações')pathname='/configuracoes.html';
 if(pathname==='/ranking')pathname='/ranking.html';
+if(pathname==='/gestao')pathname='/gestao.html';
 if(['/db.js','/server.js','/package.json','/package-lock.json'].includes(pathname)||pathname.startsWith('/.')){res.writeHead(404);return res.end('Não encontrado')}
 const file=path.resolve(root,'.'+pathname);if(file!==root&&!file.startsWith(root+path.sep)){res.writeHead(403);return res.end('Acesso negado')}
-fs.readFile(file,(err,data)=>{if(err){res.writeHead(err.code==='ENOENT'?404:500);return res.end('Arquivo indisponível')}const type=mime[path.extname(file)]||'application/octet-stream';if(type.startsWith('text/html'))data=Buffer.from(data.toString('utf8').replace('</head>','<link rel="stylesheet" href="/css/stories.css"><link rel="stylesheet" href="/css/ranking.css"><link rel="stylesheet" href="/css/book-reader.css"><link rel="stylesheet" href="/css/publication-formats.css"><script defer src="/js/avatar.js"></script><script defer src="/js/stories.js"></script><script defer src="/js/ranking.js"></script><script defer src="/js/book-reader.js"></script><script defer src="/js/publication-formats.js"></script><script defer src="/js/publication-format-privacy.js"></script><link rel="stylesheet" href="/css/prestige.css"><script defer src="/js/prestige.js"></script></head>'));res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff'});res.end(data)})
+fs.readFile(file,(err,data)=>{if(err){res.writeHead(err.code==='ENOENT'?404:500);return res.end('Arquivo indisponível')}const type=mime[path.extname(file)]||'application/octet-stream';if(type.startsWith('text/html'))data=Buffer.from(data.toString('utf8').replace('</head>','<link rel="stylesheet" href="/css/stories.css"><link rel="stylesheet" href="/css/ranking.css"><link rel="stylesheet" href="/css/book-reader.css"><link rel="stylesheet" href="/css/publication-formats.css"><script defer src="/js/avatar.js"></script><script defer src="/js/stories.js"></script><script defer src="/js/ranking.js"></script><script defer src="/js/book-reader.js"></script><script defer src="/js/publication-formats.js"></script><script defer src="/js/publication-format-privacy.js"></script><link rel="stylesheet" href="/css/prestige.css"><script defer src="/js/prestige.js"></script></head>'));res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff',...(pathname==='/gestao.html'?{'Cache-Control':'no-store, private, max-age=0','X-Frame-Options':'DENY','Referrer-Policy':'same-origin','Content-Security-Policy':"default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'"}:{})});res.end(data)})
 }).listen(port,'0.0.0.0',()=>console.log('Art em Foco online na porta '+port));
 
 setInterval(()=>getDatabase().then(stories.maintenance).catch(()=>{}),60000).unref();
