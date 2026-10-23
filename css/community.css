@@ -19,3 +19,31 @@
 .mobile-nav a{display:flex;align-items:center;justify-content:center;min-width:44px;min-height:44px}
 .mobile-nav a:hover .aef-nav-icon,.mobile-nav a.current .aef-nav-icon{transform:translateY(-2px)}
 .mobile-nav a.current{color:#ffc28a}
+
+/* Cidio Art immersive vertical feed: one artwork per swipe, never crop art. */
+body:has(.community-feed){overflow:hidden}
+.community-layout{height:100dvh;overflow:hidden;padding-top:0;padding-bottom:0}
+.main-column{height:100%;min-height:0;display:flex;flex-direction:column}
+.community-stories,.art-note{display:none!important}
+.community-feed{height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.feed-heading{flex:0 0 auto;z-index:2;padding:8px 12px;background:#17191f}
+.feed-heading h1{font-size:16px}
+.community-posts{flex:1;min-height:0;overflow-y:auto;overscroll-behavior-y:contain;scroll-snap-type:y mandatory;scrollbar-width:none}
+.community-posts::-webkit-scrollbar{display:none}
+.community-post{height:100%;min-height:100%;scroll-snap-align:start;scroll-snap-stop:always;position:relative;display:flex;flex-direction:column;justify-content:center;overflow:hidden;background:#080a0e;border:0!important;border-radius:0!important;margin:0!important;padding:0!important}
+.community-post .post-image{display:block;flex:1 1 auto;min-height:0;width:100%;height:100%;max-height:100%;object-fit:contain!important;border-radius:0!important;background:#080a0e;cursor:pointer}
+.community-post .post-head{position:absolute;left:12px;top:12px;z-index:2;max-width:calc(100% - 24px);background:#090b10ba;border-radius:16px;padding:7px 10px}
+.community-post .post-details{position:absolute;left:0;right:0;bottom:0;z-index:2;padding:42px 16px 16px!important;background:linear-gradient(transparent,#080a0eea);max-height:48%;overflow-y:auto}
+.community-post .post-details .post-description{color:#fff}
+.community-post .post-details .post-privacy{color:#d0d0d8}
+.feed-empty{margin:auto}
+@media(max-width:760px){
+ .mobile-header{position:relative;flex:0 0 56px}
+ .community-layout{height:calc(100dvh - 56px - 62px);margin:0!important;padding:0!important}
+ .community-feed{height:100%}
+ .feed-heading{padding:7px 12px}
+ .feed-heading h1{font-size:15px}
+ .community-post .post-head{top:8px}
+ .community-post .post-details{padding:35px 14px 12px!important}
+}
+@media(min-width:761px){.community-layout{height:100dvh}.main-column{max-width:740px;margin:auto;width:100%}}
