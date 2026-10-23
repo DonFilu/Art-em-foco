@@ -17,6 +17,7 @@ const badges=require('./modules/badges');
 const {avatarInfo}=require('./modules/avatars');
 const ART_MAX=5*1024*1024;
 // Cache apenas de artes públicas: reduz leituras repetidas no ImageKit sem armazenar obras privadas.
+const publicArtPending=new Map();
 const publicArtCache=new Map();let publicArtCacheBytes=0;const PUBLIC_ART_CACHE_MAX=48*1024*1024,PUBLIC_ART_CACHE_TTL=5*60*1000;
 function cachedPublicArt(key){const item=publicArtCache.get(key);if(!item)return null;if(item.expires<Date.now()){publicArtCache.delete(key);publicArtCacheBytes-=item.bytes.length;return null}publicArtCache.delete(key);publicArtCache.set(key,item);return item.bytes}
 function savePublicArt(key,bytes){if(bytes.length>PUBLIC_ART_CACHE_MAX/4)return;const old=publicArtCache.get(key);if(old){publicArtCacheBytes-=old.bytes.length;publicArtCache.delete(key)}publicArtCache.set(key,{bytes,expires:Date.now()+PUBLIC_ART_CACHE_TTL});publicArtCacheBytes+=bytes.length;while(publicArtCacheBytes>PUBLIC_ART_CACHE_MAX){const oldest=publicArtCache.keys().next().value;if(!oldest)break;publicArtCacheBytes-=publicArtCache.get(oldest).bytes.length;publicArtCache.delete(oldest)}}
@@ -331,14 +332,23 @@ if(pathname.startsWith('/api/art/media/')){
   const user=await sessionUser(req);if(!await canViewArt(db,post,user))return json(res,403,{error:'Acesso restrito'});
   const feed=new URL(req.url,'http://localhost').searchParams.get('size')==='feed';
   const publicPost=post.visibility==='public',cacheKey=id+':'+(feed?'feed':'full');
+  const download=async()=>{
+   const upstream=await fetch(privateArtURL(post.fileURL,feed && post.mime!=='image/gif'),{signal:AbortSignal.timeout(20000),redirect:'error'});
+   if(!upstream.ok)throw Error('ImageKit recusou imagem privada: '+upstream.status);
+   const data=Buffer.from(await upstream.arrayBuffer());
+   if(data.length>ART_MAX+1024)throw Error('Arquivo inválido');
+   if(publicPost)savePublicArt(cacheKey,data);
+   return data;
+  };
   let bytes=publicPost?cachedPublicArt(cacheKey):null;
   if(!bytes){
-   const upstream=await fetch(privateArtURL(post.fileURL,feed && post.mime!=='image/gif'),{signal:AbortSignal.timeout(20000),redirect:'error'});
-   if(!upstream.ok){console.error('ImageKit recusou imagem privada:',upstream.status);return json(res,502,{error:'Imagem indisponível'});}
-   bytes=Buffer.from(await upstream.arrayBuffer());if(bytes.length>ART_MAX+1024)return json(res,502,{error:'Arquivo inválido'});
-   if(publicPost)savePublicArt(cacheKey,bytes);
+   if(publicPost){
+    let pending=publicArtPending.get(cacheKey);
+    if(!pending){pending=download();publicArtPending.set(cacheKey,pending);pending.finally(()=>{if(publicArtPending.get(cacheKey)===pending)publicArtPending.delete(cacheKey)}).catch(()=>{});}
+    bytes=await pending;
+   }else bytes=await download();
   }
-  res.writeHead(200,{'Content-Type':post.mime,'Content-Length':bytes.length,'Cache-Control':publicPost?'private, max-age=600':'private, no-store, max-age=0','Vary':'Cookie','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Cross-Origin-Resource-Policy':'same-origin','X-Frame-Options':'DENY'});
+  res.writeHead(200,{'Content-Type':post.mime,'Content-Length':bytes.length,'Cache-Control':publicPost?'private, max-age=60, must-revalidate':'private, no-store, max-age=0','Vary':'Cookie','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Cross-Origin-Resource-Policy':'same-origin','X-Frame-Options':'DENY'});
   return res.end(bytes);
  }catch(e){console.error('Falha ao abrir arte:',e.message);return json(res,503,{error:'Não foi possível abrir a arte'})}
 }
