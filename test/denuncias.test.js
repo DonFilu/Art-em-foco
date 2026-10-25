@@ -23,3 +23,19 @@ test('unauthenticated report endpoints are rejected before database access',asyn
  assert.equal(handled,true);
  assert.equal(response.status,401);
 });
+test('administrative filters validate dates and include the selected final day',()=>{
+ const filter=reports.adminFilter(new URLSearchParams('status=reviewing&type=post&from=2026-01-01&to=2026-01-02'));
+ assert.equal(filter.status,'reviewing');
+ assert.equal(filter.targetType,'post');
+ assert.equal(filter.createdAt.$gte.toISOString(),'2026-01-01T00:00:00.000Z');
+ assert.equal(filter.createdAt.$lte.toISOString(),'2026-01-02T23:59:59.999Z');
+ assert.throws(()=>reports.adminFilter(new URLSearchParams('from=2026-02-02&to=2026-02-01')),/Intervalo/);
+});
+test('administrative updates use an aggregation pipeline instead of replacing history from a stale read',async()=>{
+ let pipeline;
+ const db={collection:()=>({findOneAndUpdate:async(_query,value)=>{pipeline=value;return {_id:'report'}}})};
+ await reports.update(db,{user:{_id:'admin'}},'RPT-ABCDEF123456',{status:'reviewing',internalNote:'nota',publicResult:''});
+ assert.equal(Array.isArray(pipeline),true);
+ assert.match(JSON.stringify(pipeline),/\$concatArrays/);
+ assert.match(JSON.stringify(pipeline),/_previousStatus/);
+});
