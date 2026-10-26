@@ -39,3 +39,18 @@ test('administrative updates use an aggregation pipeline instead of replacing hi
  assert.match(JSON.stringify(pipeline),/\$concatArrays/);
  assert.match(JSON.stringify(pipeline),/_previousStatus/);
 });
+test('an already open duplicate is rejected before post evidence capture',async()=>{
+ let captures=0;
+ const post={_id:{toString:()=> 'a'.repeat(24)},authorId:'AEF-00000002',visibility:'public',description:'arte'};
+ const db={collection:name=>name==='art_posts'?{findOne:async()=>post}:{countDocuments:async()=>0,findOne:async()=>({_id:'existing'})}};
+ await assert.rejects(()=>reports.submit(db,{_id:'user',artId:'AEF-00000001'},{type:'post',targetId:'a'.repeat(24),reason:'spam'},async()=>true,async()=>{captures++;return {media:[],claims:[],createdIds:[]}}),/já possui/);
+ assert.equal(captures,0);
+});
+test('a failed report insert releases claims and discards only newly captured evidence',async()=>{
+ const post={_id:{toString:()=> 'b'.repeat(24)},authorId:'AEF-00000002',visibility:'public',description:'arte'};let released,discarded;
+ const reportsCollection={countDocuments:async()=>0,findOne:async()=>null,insertOne:async()=>{throw Error('falha')}};
+ const db={collection:name=>name==='art_posts'?{findOne:async()=>post}:reportsCollection};
+ await assert.rejects(()=>reports.submit(db,{_id:'user',artId:'AEF-00000001'},{type:'post',targetId:'b'.repeat(24),reason:'spam'},async()=>true,async()=>({media:[{fileId:'c'.repeat(24)}],claims:['c'.repeat(24)],createdIds:['c'.repeat(24)]}),async(_db,ids)=>{released=ids},async(_db,ids)=>{discarded=ids}));
+ assert.deepEqual(released,['c'.repeat(24)]);
+ assert.deepEqual(discarded,['c'.repeat(24)]);
+});
