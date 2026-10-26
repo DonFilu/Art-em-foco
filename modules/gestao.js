@@ -160,4 +160,4 @@ async function route(req,res,pathname,{sessionUser,getDatabase,json,readJSON}){
  }
 }
 
-module.exports={route,parsePasswordHash,verifyPassword,configured};
+module.exports={route,parsePasswordHash,verifyPassword,configured,requireAdmin};
