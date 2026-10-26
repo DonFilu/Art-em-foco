@@ -17,6 +17,7 @@ const badges=require('./modules/badges');
 const gestao=require('./modules/gestao');
 const denuncias=require('./modules/denuncias');
 const moderation=require('./modules/user-moderation');
+const moderationRemovals=require('./modules/moderation-removals');
 const {avatarInfo}=require('./modules/avatars');
 const ART_MAX=5*1024*1024;
 // Cache apenas de artes públicas: reduz leituras repetidas no ImageKit sem armazenar obras privadas.
@@ -80,19 +81,27 @@ async function archiveModeratedContent(db,report,admin,justification){
  return archive;
 }
 async function removePostByModerator(db,report){
- if(!ObjectId.isValid(report.targetId))return 'missing';const posts=db.collection('art_posts'),post=await posts.findOne({_id:new ObjectId(report.targetId),authorId:report.reportedAuthorId,deletingAt:{$exists:false}});
- if(!post)return 'missing';const locked=await posts.updateOne({_id:post._id,authorId:post.authorId,deletingAt:{$exists:false}},{$set:{deletingAt:new Date(),removalReason:'Exclusão administrativa'}});if(!locked.modifiedCount)return 'missing';
- const unlock=()=>posts.updateOne({_id:post._id,deletingAt:{$exists:true}},{$unset:{deletingAt:'',removalReason:''}});
- const files=[post.fileId,...(Array.isArray(post.pages)?post.pages.map(page=>page.fileId):[])].filter((file,index,list)=>file&&list.indexOf(file)===index);if(!files.length){await unlock();throw Error('Publicação sem mídia identificável')}
- try{for(const file of files)await removePrivateArt(file)}catch(error){await unlock();throw Error('Não foi possível excluir todos os arquivos da publicação')}
- try{const likesReceived=await db.collection('post_likes').countDocuments({postId:post._id});await db.collection('deleted_post_likes').updateOne({_id:post._id},{$setOnInsert:{authorId:post.authorId,likesReceived,deletedAt:new Date()},$set:{visibility:post.visibility}},{upsert:true});await interactions.cleanupPost(db,post._id);const removed=await posts.deleteOne({_id:post._id,authorId:post.authorId});if(!removed.deletedCount)throw Error('Não foi possível finalizar a exclusão da publicação');return 'deleted'}catch(error){await unlock();throw error}
+ if(!ObjectId.isValid(report.targetId))return 'missing';const posts=db.collection('art_posts'),post=await posts.findOne({_id:new ObjectId(report.targetId),authorId:report.reportedAuthorId});if(!post)return 'missing';
+ if(post.moderationRemoval?.reportProtocol&&post.moderationRemoval.reportProtocol!==report.protocol)return 'missing';
+ const files=[post.fileId,...(Array.isArray(post.pages)?post.pages.map(page=>page.fileId):[])].filter((file,index,list)=>file&&list.indexOf(file)===index);
+ if(!files.length)throw Error('Publicação sem mídia identificável');
+ /* Hide the complete publication first. It remains intact in MongoDB until the
+  * external files and the idempotent interaction cleanup have all succeeded. */
+ const hidden=await posts.updateOne({_id:post._id,authorId:post.authorId,$or:[{deletingAt:{$exists:false}},{'moderationRemoval.reportProtocol':report.protocol}]},{$set:{deletingAt:post.deletingAt||new Date(),removalReason:'Exclusão administrativa',moderationRemoval:{reportProtocol:report.protocol,state:'pending',files,startedAt:post.moderationRemoval?.startedAt||new Date()}}});
+ if(!hidden.modifiedCount&&post.moderationRemoval?.reportProtocol!==report.protocol)return 'missing';
+ const result=await moderationRemovals.runPostRemoval(db,report,files,{removeFile:removePrivateArt,finalize:async()=>{const likesReceived=await db.collection('post_likes').countDocuments({postId:post._id});await db.collection('deleted_post_likes').updateOne({_id:post._id},{$setOnInsert:{authorId:post.authorId,likesReceived,deletedAt:new Date()},$set:{visibility:post.visibility}},{upsert:true});await interactions.cleanupPost(db,post._id);const removed=await posts.deleteOne({_id:post._id,authorId:post.authorId,'moderationRemoval.reportProtocol':report.protocol});if(!removed.deletedCount)throw Error('Não foi possível finalizar a exclusão da publicação')}});
+ if(result.state==='pending')throw Error('A exclusão externa ficou pendente e poderá ser retomada com segurança; a publicação permanece indisponível.');
+ return result.state;
 }
 async function removeReportedContent(db,report,admin,justification){
+ if(report.moderationContentRemoval?.completedAt)return 'deleted';
  await archiveModeratedContent(db,report,admin,justification);
- if(report.targetType==='post')return removePostByModerator(db,report);
- if(report.targetType==='comment'||report.targetType==='reply')return (await interactions.removeCommentByModerator(db,report.targetId,report.reportedAuthorId)).state;
- if(report.targetType==='story')return (await stories.removeByModerator(db,report.targetId,report.reportedAuthorId,'Exclusão administrativa: '+justification))?'deleted':'missing';
- return 'missing';
+ let outcome='missing';
+ if(report.targetType==='post')outcome=await removePostByModerator(db,report);
+ else if(report.targetType==='comment'||report.targetType==='reply')outcome=(await interactions.removeCommentByModerator(db,report.targetId,report.reportedAuthorId)).state;
+ else if(report.targetType==='story')outcome=(await stories.removeByModerator(db,report.targetId,report.reportedAuthorId,'Exclusão administrativa: '+justification))?'deleted':'missing';
+ if(outcome==='deleted')await db.collection('reports').updateOne({_id:report._id},{$set:{moderationContentRemoval:{completedAt:new Date(),type:report.targetType,targetId:report.targetId}}});
+ return outcome;
 }
 async function uploadBookPages(pages,user){const uploaded=[];try{for(const page of pages)uploaded.push(await uploadPrivateArt(page,user));return uploaded}catch(error){await Promise.allSettled(uploaded.map(file=>removePrivateArt(file.fileId)));throw error}}
 async function canViewArt(db,post,user){
@@ -358,7 +367,7 @@ if(pathname==='/api/art/feed'){
   const filter=params.get('filter')==='friends'?'friends':'all';
   const relations=user?await db.collection('friendships').find({members:user.artId,status:'accepted'}).limit(500).toArray():[];
   const friendIds=relations.map(r=>r.members.find(id=>id!==user.artId));
-  const query=filter==='friends'?{authorId:{$in:friendIds}}:{$or:[{visibility:'public'},...(user?[{authorId:{$in:[...friendIds,user.artId]},visibility:'friends'},{authorId:user.artId}]:[])]};
+  const visible={deletingAt:{$exists:false}},audience=filter==='friends'?{authorId:{$in:friendIds}}:{$or:[{visibility:'public'},...(user?[{authorId:{$in:[...friendIds,user.artId]},visibility:'friends'},{authorId:user.artId}]:[])]},query={$and:[visible,audience]};
   const posts=await db.collection('art_posts').find(query).sort({createdAt:-1}).limit(60).toArray();
   const users=await db.collection('users').find({artId:{$in:[...new Set(posts.map(p=>p.authorId))]}}).toArray();
   const artists=new Map(users.map(u=>[u.artId,publicUser(u)]));
@@ -371,7 +380,7 @@ if(pathname==='/api/art/posts'){
   const user=await sessionUser(req),db=await getDatabase(),params=new URL(req.url,'http://localhost').searchParams;
   const author=params.get('author')||user?.artId||'';
   if(!/^AEF-\d{8,}$/.test(author))return json(res,400,{error:'Artista inválido'});
-  const posts=await db.collection('art_posts').find({authorId:author}).sort({createdAt:-1}).limit(50).toArray();
+  const posts=await db.collection('art_posts').find({authorId:author,deletingAt:{$exists:false}}).sort({createdAt:-1}).limit(50).toArray();
   const allowed=[];for(const post of posts){if(await canViewArt(db,post,user))allowed.push(post)}
   return json(res,200,{posts:await postViews(db,allowed,user)});
  }catch{return json(res,503,{error:'Não foi possível carregar publicações'})}
@@ -379,13 +388,13 @@ if(pathname==='/api/art/posts'){
 const bookPageMatch=/^\/api\/art\/posts\/([a-f0-9]{24})\/pages\/(\d+)$/.exec(pathname);
 if(bookPageMatch){
  if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});
- try{const db=await getDatabase(),post=await db.collection('art_posts').findOne({_id:new ObjectId(bookPageMatch[1])}),index=Number(bookPageMatch[2]),page=post?.pages?.[index];if(!post||!page)return json(res,404,{error:'Página não encontrada'});const user=await sessionUser(req);if(!await canViewArt(db,post,user))return json(res,403,{error:'Acesso restrito'});const upstream=await fetch(privateArtURL(page.fileURL),{signal:AbortSignal.timeout(20000),redirect:'error'});if(!upstream.ok)return json(res,502,{error:'Página indisponível'});const bytes=Buffer.from(await upstream.arrayBuffer());if(bytes.length>BOOK_PAGE_MAX+1024)return json(res,502,{error:'Arquivo inválido'});res.writeHead(200,{'Content-Type':page.mime||'image/png','Content-Length':bytes.length,'Cache-Control':'private, no-store, max-age=0','Vary':'Cookie','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Cross-Origin-Resource-Policy':'same-origin','X-Frame-Options':'DENY'});return res.end(bytes)}catch(e){console.error('Falha ao abrir página:',e.message);return json(res,503,{error:'Não foi possível abrir a página'})}
+ try{const db=await getDatabase(),post=await db.collection('art_posts').findOne({_id:new ObjectId(bookPageMatch[1]),deletingAt:{$exists:false}}),index=Number(bookPageMatch[2]),page=post?.pages?.[index];if(!post||!page)return json(res,404,{error:'Página não encontrada'});const user=await sessionUser(req);if(!await canViewArt(db,post,user))return json(res,403,{error:'Acesso restrito'});const upstream=await fetch(privateArtURL(page.fileURL),{signal:AbortSignal.timeout(20000),redirect:'error'});if(!upstream.ok)return json(res,502,{error:'Página indisponível'});const bytes=Buffer.from(await upstream.arrayBuffer());if(bytes.length>BOOK_PAGE_MAX+1024)return json(res,502,{error:'Arquivo inválido'});res.writeHead(200,{'Content-Type':page.mime||'image/png','Content-Length':bytes.length,'Cache-Control':'private, no-store, max-age=0','Vary':'Cookie','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Cross-Origin-Resource-Policy':'same-origin','X-Frame-Options':'DENY'});return res.end(bytes)}catch(e){console.error('Falha ao abrir página:',e.message);return json(res,503,{error:'Não foi possível abrir a página'})}
 }
 if(pathname.startsWith('/api/art/media/')){
  if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});
  const id=pathname.slice('/api/art/media/'.length);if(!/^[a-f0-9]{24}$/.test(id))return json(res,404,{error:'Imagem não encontrada'});
  try{
-  const db=await getDatabase(),post=await db.collection('art_posts').findOne({_id:new ObjectId(id)});
+  const db=await getDatabase(),post=await db.collection('art_posts').findOne({_id:new ObjectId(id),deletingAt:{$exists:false}});
   if(!post)return json(res,404,{error:'Imagem não encontrada'});
   const user=await sessionUser(req);if(!await canViewArt(db,post,user))return json(res,403,{error:'Acesso restrito'});
   const feed=new URL(req.url,'http://localhost').searchParams.get('size')==='feed';

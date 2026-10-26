@@ -3,6 +3,7 @@ const assert=require('node:assert/strict');
 const {test}=require('node:test');
 const reports=require('../modules/denuncias');
 const moderation=require('../modules/user-moderation');
+const removals=require('../modules/moderation-removals');
 const source=require('node:fs').readFileSync(require.resolve('../modules/denuncias'),'utf8');
 
 test('public report details never expose reporter identity, evidence, or internal notes',()=>{
@@ -66,7 +67,7 @@ test('administrative deletion requires confirmation, audits the operation, and o
 test('administrative decisions are locked, require justification, and record independent actions',async()=>{
  const report={_id:'report-id',protocol:'RPT-ABCDEF123456',targetType:'post',targetId:'a'.repeat(24),reportedAuthorId:'AEF-00000002',status:'received'};
  const updates=[],calls=[];
- const db={collection:name=>name==='reports'?{findOneAndUpdate:async()=>report,updateOne:async(_query,update)=>updates.push(update)}:name==='users'?{findOne:async()=>({_id:'target',googleSub:'123456789012',artId:'AEF-00000002'})}:{}};
+ const db={collection:name=>name==='reports'?{findOneAndUpdate:async()=>report,updateOne:async(_query,update)=>{updates.push(update);return {modifiedCount:1}}}:name==='users'?{findOne:async()=>({_id:'target',googleSub:'123456789012',artId:'AEF-00000002'})}:{}};
  const service={ensureIndexes:async()=>{},applyWarning:async(...args)=>calls.push(['warning',args]),setBan:async(...args)=>calls.push(['ban',args]),writeAudit:async(...args)=>calls.push(['audit',args])};
  await assert.rejects(()=>reports.applyAdministrativeAction(db,{user:{_id:'admin'}},report.protocol,{confirm:true,actions:{warning:true},justification:''},service,async()=>{}),/justificativa/i);
  const result=await reports.applyAdministrativeAction(db,{user:{_id:'admin'}},report.protocol,{confirm:true,status:'resolved',justification:'Violação confirmada',actions:{removeContent:true,warning:true,ban:true}},service,async()=>{calls.push(['remove']);return 'deleted'});
@@ -84,4 +85,30 @@ test('warning acknowledgement is bound to the affected account and audit uses a 
  assert.equal(response.status,200);
  assert.equal(calls.some(([name,query])=>name==='user_warnings'&&query?.userId==='user'),true);
  assert.equal(calls.some(([name])=>name==='moderation_audit'),true);
+});
+test('an expired administrative lease is recoverable',async()=>{
+ let query;
+ const db={collection:()=>({findOneAndUpdate:async(value)=>{query=value;return {_id:'report'}}})};
+ const claimed=await reports.acquireActionLease(db,'RPT-ABCDEF123456','admin');
+ assert.equal(typeof claimed.leaseId,'string');
+ assert.match(JSON.stringify(query),/leaseExpiresAt/);
+ assert.match(JSON.stringify(query),/\$lte/);
+});
+test('post-removal journal resumes after a partial ImageKit failure without repeating pages',async()=>{
+ let job;const collection={createIndex:async()=>{},findOneAndUpdate:async(_query,update)=>{if(!job)job={_id:'job',...update.$setOnInsert,...update.$set};else Object.assign(job,update.$set||{});return {...job,deletedFileIds:[...(job.deletedFileIds||[])]}},updateOne:async(_query,update)=>{if(update.$addToSet?.deletedFileIds&&!job.deletedFileIds.includes(update.$addToSet.deletedFileIds))job.deletedFileIds.push(update.$addToSet.deletedFileIds);if(update.$set)Object.assign(job,update.$set);if(update.$unset)for(const key of Object.keys(update.$unset))delete job[key];return {modifiedCount:1}}};
+ const db={collection:()=>collection},report={protocol:'RPT-ABCDEF123456',targetType:'post',targetId:'a'.repeat(24),reportedAuthorId:'AEF-00000002'};
+ const first=await removals.runPostRemoval(db,report,['cover','page-2'],{removeFile:async file=>{if(file==='page-2')throw Error('ImageKit indisponível')},finalize:async()=>{throw Error('não deve finalizar')}});
+ assert.equal(first.state,'pending');assert.deepEqual(job.deletedFileIds,['cover']);
+ const retried=[];let finalized=false;
+ const second=await removals.runPostRemoval(db,report,['cover','page-2'],{removeFile:async file=>retried.push(file),finalize:async()=>{finalized=true}});
+ assert.equal(second.state,'deleted');assert.deepEqual(retried,['page-2']);assert.equal(finalized,true);assert.equal(job.state,'completed');
+});
+test('a live external-removal lease prevents concurrent duplicate work',async()=>{
+ const db={collection:()=>({createIndex:async()=>{},findOneAndUpdate:async()=>null})};
+ const result=await removals.runPostRemoval(db,{protocol:'RPT-ABCDEF123456',targetType:'post',targetId:'a'.repeat(24),reportedAuthorId:'AEF-00000002'},['cover'],{removeFile:async()=>{throw Error('não deveria executar')},finalize:async()=>{}});
+ assert.equal(result.state,'busy');
+});
+test('a lost report-action lease aborts before a second administrative mutation',async()=>{
+ const db={collection:()=>({updateOne:async()=>({modifiedCount:0})})};
+ await assert.rejects(()=>reports.renewActionLease(db,'report','lease'),/perdeu o bloqueio/);
 });
