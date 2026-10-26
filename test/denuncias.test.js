@@ -54,3 +54,11 @@ test('a failed report insert releases claims and discards only newly captured ev
  assert.deepEqual(released,['c'.repeat(24)]);
  assert.deepEqual(discarded,['c'.repeat(24)]);
 });
+test('administrative deletion requires confirmation, audits the operation, and only discards selected evidence',async()=>{
+ const updates=[],discarded=[];
+ const db={collection:name=>name==='admin_audit'?{insertOne:async()=>({insertedId:'audit'}),updateOne:async(_id,update)=>updates.push(update)}:{findOneAndDelete:async query=>({protocol:query.protocol,evidence:{media:[{fileId:'d'.repeat(24)}]}})}};
+ await assert.rejects(()=>reports.removeByAdmin(db,{user:{_id:'admin'}},'RPT-ABCDEF123456',{confirm:false},async()=>{}),/Confirmação/);
+ await reports.removeByAdmin(db,{user:{_id:'admin'}},'RPT-ABCDEF123456',{confirm:true},async(_db,ids)=>discarded.push(...ids));
+ assert.deepEqual(discarded,['d'.repeat(24)]);
+ assert.equal(updates.some(update=>update.$set?.outcome==='deleted'),true);
+});
