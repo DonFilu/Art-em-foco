@@ -16,6 +16,8 @@ const ranking=require('./modules/ranking');
 const badges=require('./modules/badges');
 const gestao=require('./modules/gestao');
 const denuncias=require('./modules/denuncias');
+const moderation=require('./modules/user-moderation');
+const moderationRemovals=require('./modules/moderation-removals');
 const {avatarInfo}=require('./modules/avatars');
 const ART_MAX=5*1024*1024;
 // Cache apenas de artes públicas: reduz leituras repetidas no ImageKit sem armazenar obras privadas.
@@ -44,7 +46,7 @@ async function uploadPrivateArt(art,user){
  if(!response.ok||!result.fileId||!result.url)throw Error('Falha no armazenamento da publicação ('+response.status+')');
  return {fileId:result.fileId,url:result.url};
 }
-async function removePrivateArt(fileId){const key=process.env.IMAGEKIT_PRIVATE_KEY;if(!key||!fileId)return;const response=await fetch('https://api.imagekit.io/v1/files/'+encodeURIComponent(fileId),{method:'DELETE',headers:{Authorization:'Basic '+Buffer.from(key+':').toString('base64')},signal:AbortSignal.timeout(20000)});if(!response.ok&&response.status!==404)throw Error('Falha ao limpar arquivo enviado')}
+async function removePrivateArt(fileId){const key=process.env.IMAGEKIT_PRIVATE_KEY;if(!key||!fileId)throw Error('ImageKit não configurado');const response=await fetch('https://api.imagekit.io/v1/files/'+encodeURIComponent(fileId),{method:'DELETE',headers:{Authorization:'Basic '+Buffer.from(key+':').toString('base64')},signal:AbortSignal.timeout(20000)});if(response.status===404)return {alreadyMissing:true};if(!response.ok)throw Error('Falha ao limpar arquivo enviado ('+response.status+')');return {deleted:true}}
 let reportEvidenceIndexes;
 async function ensureReportEvidenceIndexes(db){if(!reportEvidenceIndexes)reportEvidenceIndexes=Promise.all([db.collection('report_evidence.files').createIndex({'metadata.sourceFileId':1},{unique:true,sparse:true}),db.collection('report_evidence.files').createIndex({'metadata.pendingClaims':1,'metadata.deletingAt':1})]).catch(error=>{reportEvidenceIndexes=null;throw error});return reportEvidenceIndexes}
 async function capturePostEvidence(db,post){
@@ -60,6 +62,47 @@ async function capturePostEvidence(db,post){
 async function releaseReportEvidenceClaims(db,ids){for(const id of new Set(ids||[]))if(ObjectId.isValid(id))await db.collection('report_evidence.files').updateOne({_id:new ObjectId(id),'metadata.pendingClaims':{$gt:0}},{$inc:{'metadata.pendingClaims':-1}})}
 async function discardReportEvidence(db,ids){const bucket=new GridFSBucket(db,{bucketName:'report_evidence'});for(const id of new Set(ids||[])){if(!ObjectId.isValid(id))continue;const locked=await db.collection('report_evidence.files').findOneAndUpdate({_id:new ObjectId(id),'metadata.pendingClaims':0,'metadata.deletingAt':{$exists:false}},{$set:{'metadata.deletingAt':new Date()}},{returnDocument:'after'});if(!locked)continue;const referenced=await db.collection('reports').findOne({'evidence.media.fileId':id},{projection:{_id:1}});if(referenced){await db.collection('report_evidence.files').updateOne({_id:locked._id},{$unset:{'metadata.deletingAt':''}});continue}await bucket.delete(locked._id).catch(()=>{})}}
 async function readReportEvidence(db,id){if(!ObjectId.isValid(id))return null;const bucket=new GridFSBucket(db,{bucketName:'report_evidence'}),files=await db.collection('report_evidence.files').findOne({_id:new ObjectId(id)},{projection:{metadata:1,length:1}});if(!files||files.length>BOOK_TOTAL_MAX)return null;const chunks=[];for await(const chunk of bucket.openDownloadStream(files._id))chunks.push(chunk);return {bytes:Buffer.concat(chunks),mime:files.metadata?.mime||'application/octet-stream'} }
+function discordModerationChannel(){const channel=process.env.DISCORD_MODERATION_CHANNEL_ID;return /^\d{16,22}$/.test(channel||'')?channel:null}
+async function archiveModeratedContent(db,report,admin,justification){
+ const channel=discordModerationChannel(),token=process.env.DISCORD_BOT_TOKEN;
+ if(!channel||!token)throw Error('Canal exclusivo de moderação não configurado');
+ const current=await db.collection('reports').findOne({_id:report._id},{projection:{moderationArchive:1}});
+ if(current?.moderationArchive?.confirmedAt)return current.moderationArchive;
+ const media=report.evidence?.media||[];
+ if(media.length>10)throw Error('A publicação possui mais anexos do que o canal de moderação aceita');
+ const files=[];for(const item of media){const file=await readReportEvidence(db,item.fileId);if(!file||!file.bytes.length||file.bytes.length>8*1024*1024)throw Error('Não foi possível preparar todos os anexos para o canal de moderação');files.push({...file,mime:item.mime||file.mime})}
+ const target=await db.collection('users').findOne({artId:report.reportedAuthorId},{projection:{displayName:1,username:1,artId:1}}),name=target?.displayName||target?.username||report.reportedAuthorId;
+ const content=['**CIDIO ART — CONTEÚDO EXCLUÍDO PELA MODERAÇÃO**','Protocolo: '+report.protocol,'Tipo: '+report.targetType,'Artista: '+name+' ('+report.reportedAuthorId+')','ID do conteúdo: '+report.targetId,'Motivo da exclusão: '+justification,'Administrador: '+admin.user.artId,'Data: '+new Date().toISOString(),report.evidence?.text?'Conteúdo: '+report.evidence.text:''].filter(Boolean).join('\n').slice(0,1900);
+ const form=new FormData();form.append('payload_json',JSON.stringify({content,allowed_mentions:{parse:[]}}));files.forEach((file,index)=>form.append('files['+index+']',new Blob([file.bytes],{type:file.mime}),'evidencia-'+(index+1)));
+ const response=await fetch('https://discord.com/api/v10/channels/'+channel+'/messages',{method:'POST',headers:{Authorization:'Bot '+token},body:form,signal:AbortSignal.timeout(30000)}),data=await response.json().catch(()=>({}));
+ if(!response.ok||!data.id)throw Error('O canal de moderação não confirmou o registro ('+response.status+')');
+ const archive={channelId:channel,messageId:data.id,confirmedAt:new Date(),attachments:files.length};
+ await db.collection('reports').updateOne({_id:report._id},{$set:{moderationArchive:archive}});
+ return archive;
+}
+async function removePostByModerator(db,report){
+ if(!ObjectId.isValid(report.targetId))return 'missing';const posts=db.collection('art_posts'),post=await posts.findOne({_id:new ObjectId(report.targetId),authorId:report.reportedAuthorId});if(!post)return 'missing';
+ if(post.moderationRemoval?.reportProtocol&&post.moderationRemoval.reportProtocol!==report.protocol)return 'missing';
+ const files=[post.fileId,...(Array.isArray(post.pages)?post.pages.map(page=>page.fileId):[])].filter((file,index,list)=>file&&list.indexOf(file)===index);
+ if(!files.length)throw Error('Publicação sem mídia identificável');
+ /* Hide the complete publication first. It remains intact in MongoDB until the
+  * external files and the idempotent interaction cleanup have all succeeded. */
+ const hidden=await posts.updateOne({_id:post._id,authorId:post.authorId,$or:[{deletingAt:{$exists:false}},{'moderationRemoval.reportProtocol':report.protocol}]},{$set:{deletingAt:post.deletingAt||new Date(),removalReason:'Exclusão administrativa',moderationRemoval:{reportProtocol:report.protocol,state:'pending',files,startedAt:post.moderationRemoval?.startedAt||new Date()}}});
+ if(!hidden.modifiedCount&&post.moderationRemoval?.reportProtocol!==report.protocol)return 'missing';
+ const result=await moderationRemovals.runPostRemoval(db,report,files,{removeFile:removePrivateArt,finalize:async renew=>{await renew();const likesReceived=await db.collection('post_likes').countDocuments({postId:post._id});await renew();await db.collection('deleted_post_likes').updateOne({_id:post._id},{$setOnInsert:{authorId:post.authorId,likesReceived,deletedAt:new Date()},$set:{visibility:post.visibility}},{upsert:true});await renew();await interactions.cleanupPost(db,post._id);await renew();const removed=await posts.deleteOne({_id:post._id,authorId:post.authorId,'moderationRemoval.reportProtocol':report.protocol});if(!removed.deletedCount)throw Error('Não foi possível finalizar a exclusão da publicação')}});
+ if(result.state==='pending')throw Error('A exclusão externa ficou pendente e poderá ser retomada com segurança; a publicação permanece indisponível.');
+ return result.state;
+}
+async function removeReportedContent(db,report,admin,justification){
+ if(report.moderationContentRemoval?.completedAt)return 'deleted';
+ await archiveModeratedContent(db,report,admin,justification);
+ let outcome='missing';
+ if(report.targetType==='post')outcome=await removePostByModerator(db,report);
+ else if(report.targetType==='comment'||report.targetType==='reply')outcome=(await interactions.removeCommentByModerator(db,report.targetId,report.reportedAuthorId)).state;
+ else if(report.targetType==='story')outcome=(await stories.removeByModerator(db,report.targetId,report.reportedAuthorId,'Exclusão administrativa: '+justification))?'deleted':'missing';
+ if(outcome==='deleted')await db.collection('reports').updateOne({_id:report._id},{$set:{moderationContentRemoval:{completedAt:new Date(),type:report.targetType,targetId:report.targetId}}});
+ return outcome;
+}
 async function uploadBookPages(pages,user){const uploaded=[];try{for(const page of pages)uploaded.push(await uploadPrivateArt(page,user));return uploaded}catch(error){await Promise.allSettled(uploaded.map(file=>removePrivateArt(file.fileId)));throw error}}
 async function canViewArt(db,post,user){
  if(post.visibility==='public'||user?.artId===post.authorId)return true;
@@ -174,15 +217,20 @@ if(pathname==='/api/auth/google'){
     await notifications.welcome(db,user._id);
    }
  }else{await users.updateOne({_id:user._id},{$set:{email:payload.email||'',picture:payload.picture||'',lastLoginAt:now}});user=await users.findOne({_id:user._id})}
+ if(moderation.banFor(user)){await db.collection('sessions').deleteMany({userId:user._id});return json(res,403,{error:'Esta conta foi banida do Cidio Art.',code:'banned',justification:moderation.banFor(user).justification||''})}
  return issueSession(db,user,res)
  }catch(e){console.error('Falha ao persistir login:',e.message);return json(res,503,{error:'Não foi possível salvar a conta no banco de dados'})}
 }
+if(pathname.startsWith('/api/')){
+ try{const user=await sessionUser(req),allowed=pathname==='/api/moderation/state'||/^\/api\/moderation\/warnings\/[a-f0-9]{24}\/acknowledge$/i.test(pathname)||pathname==='/api/auth/logout'||pathname==='/api/auth/me';if(user&&!allowed){const state=await moderation.state(await getDatabase(),user);if(state.banned)return json(res,403,{error:'Esta conta foi banida do Cidio Art.',code:'banned',justification:state.ban?.justification||''});if(state.warnings.length)return json(res,423,{error:'Reconheça as advertências pendentes para continuar.',code:'warning_pending'})}}catch(error){return json(res,503,{error:'Não foi possível validar o estado da conta'})}
+}
+if(await moderation.route(req,res,pathname,{sessionUser,getDatabase,json,readJSON}))return;
 if(await notifications.route(req,res,pathname,{sessionUser,getDatabase,json}))return;
 if(await interactions.route(req,res,pathname,{sessionUser,getDatabase,json,canViewArt,notifications,ensureIndexes}))return;
 if(await stories.route(req,res,pathname,{sessionUser,getDatabase,json}))return;
 if(await ranking.route(req,res,pathname,{sessionUser,getDatabase,json}))return;
 if(await badges.route(req,res,pathname,{sessionUser,getDatabase,json}))return;
-if(await denuncias.route(req,res,pathname,{sessionUser,getDatabase,json,readJSON,canViewArt,gestao,capturePostEvidence,readReportEvidence,releaseReportEvidenceClaims,discardReportEvidence}))return;
+if(await denuncias.route(req,res,pathname,{sessionUser,getDatabase,json,readJSON,canViewArt,gestao,capturePostEvidence,readReportEvidence,releaseReportEvidenceClaims,discardReportEvidence,moderation,removeContent:removeReportedContent}))return;
 if(await gestao.route(req,res,pathname,{sessionUser,getDatabase,json,readJSON}))return;
 if(pathname==='/api/auth/me'){if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});try{const u=await sessionUser(req);return u?json(res,200,{user:safeUser(u)}):json(res,401,{error:'Sessão não encontrada'})}catch{return json(res,503,{error:'Banco de dados indisponível'})}}
 if(pathname==='/api/auth/logout'){if(req.method!=='POST')return json(res,405,{error:'Método não permitido'});try{const token=cookies(req).aef_session;if(token)await (await getDatabase()).collection('sessions').deleteOne({_id:crypto.createHash('sha256').update(token).digest('hex')});return json(res,200,{ok:true},{'Set-Cookie':cookie('',0)})}catch{return json(res,503,{error:'Não foi possível encerrar a sessão'})}}
@@ -319,7 +367,7 @@ if(pathname==='/api/art/feed'){
   const filter=params.get('filter')==='friends'?'friends':'all';
   const relations=user?await db.collection('friendships').find({members:user.artId,status:'accepted'}).limit(500).toArray():[];
   const friendIds=relations.map(r=>r.members.find(id=>id!==user.artId));
-  const query=filter==='friends'?{authorId:{$in:friendIds}}:{$or:[{visibility:'public'},...(user?[{authorId:{$in:[...friendIds,user.artId]},visibility:'friends'},{authorId:user.artId}]:[])]};
+  const visible={deletingAt:{$exists:false}},audience=filter==='friends'?{authorId:{$in:friendIds}}:{$or:[{visibility:'public'},...(user?[{authorId:{$in:[...friendIds,user.artId]},visibility:'friends'},{authorId:user.artId}]:[])]},query={$and:[visible,audience]};
   const posts=await db.collection('art_posts').find(query).sort({createdAt:-1}).limit(60).toArray();
   const users=await db.collection('users').find({artId:{$in:[...new Set(posts.map(p=>p.authorId))]}}).toArray();
   const artists=new Map(users.map(u=>[u.artId,publicUser(u)]));
@@ -332,7 +380,7 @@ if(pathname==='/api/art/posts'){
   const user=await sessionUser(req),db=await getDatabase(),params=new URL(req.url,'http://localhost').searchParams;
   const author=params.get('author')||user?.artId||'';
   if(!/^AEF-\d{8,}$/.test(author))return json(res,400,{error:'Artista inválido'});
-  const posts=await db.collection('art_posts').find({authorId:author}).sort({createdAt:-1}).limit(50).toArray();
+  const posts=await db.collection('art_posts').find({authorId:author,deletingAt:{$exists:false}}).sort({createdAt:-1}).limit(50).toArray();
   const allowed=[];for(const post of posts){if(await canViewArt(db,post,user))allowed.push(post)}
   return json(res,200,{posts:await postViews(db,allowed,user)});
  }catch{return json(res,503,{error:'Não foi possível carregar publicações'})}
@@ -340,13 +388,13 @@ if(pathname==='/api/art/posts'){
 const bookPageMatch=/^\/api\/art\/posts\/([a-f0-9]{24})\/pages\/(\d+)$/.exec(pathname);
 if(bookPageMatch){
  if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});
- try{const db=await getDatabase(),post=await db.collection('art_posts').findOne({_id:new ObjectId(bookPageMatch[1])}),index=Number(bookPageMatch[2]),page=post?.pages?.[index];if(!post||!page)return json(res,404,{error:'Página não encontrada'});const user=await sessionUser(req);if(!await canViewArt(db,post,user))return json(res,403,{error:'Acesso restrito'});const upstream=await fetch(privateArtURL(page.fileURL),{signal:AbortSignal.timeout(20000),redirect:'error'});if(!upstream.ok)return json(res,502,{error:'Página indisponível'});const bytes=Buffer.from(await upstream.arrayBuffer());if(bytes.length>BOOK_PAGE_MAX+1024)return json(res,502,{error:'Arquivo inválido'});res.writeHead(200,{'Content-Type':page.mime||'image/png','Content-Length':bytes.length,'Cache-Control':'private, no-store, max-age=0','Vary':'Cookie','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Cross-Origin-Resource-Policy':'same-origin','X-Frame-Options':'DENY'});return res.end(bytes)}catch(e){console.error('Falha ao abrir página:',e.message);return json(res,503,{error:'Não foi possível abrir a página'})}
+ try{const db=await getDatabase(),post=await db.collection('art_posts').findOne({_id:new ObjectId(bookPageMatch[1]),deletingAt:{$exists:false}}),index=Number(bookPageMatch[2]),page=post?.pages?.[index];if(!post||!page)return json(res,404,{error:'Página não encontrada'});const user=await sessionUser(req);if(!await canViewArt(db,post,user))return json(res,403,{error:'Acesso restrito'});const upstream=await fetch(privateArtURL(page.fileURL),{signal:AbortSignal.timeout(20000),redirect:'error'});if(!upstream.ok)return json(res,502,{error:'Página indisponível'});const bytes=Buffer.from(await upstream.arrayBuffer());if(bytes.length>BOOK_PAGE_MAX+1024)return json(res,502,{error:'Arquivo inválido'});res.writeHead(200,{'Content-Type':page.mime||'image/png','Content-Length':bytes.length,'Cache-Control':'private, no-store, max-age=0','Vary':'Cookie','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Cross-Origin-Resource-Policy':'same-origin','X-Frame-Options':'DENY'});return res.end(bytes)}catch(e){console.error('Falha ao abrir página:',e.message);return json(res,503,{error:'Não foi possível abrir a página'})}
 }
 if(pathname.startsWith('/api/art/media/')){
  if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});
  const id=pathname.slice('/api/art/media/'.length);if(!/^[a-f0-9]{24}$/.test(id))return json(res,404,{error:'Imagem não encontrada'});
  try{
-  const db=await getDatabase(),post=await db.collection('art_posts').findOne({_id:new ObjectId(id)});
+  const db=await getDatabase(),post=await db.collection('art_posts').findOne({_id:new ObjectId(id),deletingAt:{$exists:false}});
   if(!post)return json(res,404,{error:'Imagem não encontrada'});
   const user=await sessionUser(req);if(!await canViewArt(db,post,user))return json(res,403,{error:'Acesso restrito'});
   const feed=new URL(req.url,'http://localhost').searchParams.get('size')==='feed';
@@ -382,7 +430,7 @@ if(pathname==='/gestao')pathname='/gestao.html';
 if(pathname==='/minhas-denuncias')pathname='/minhas-denuncias.html';
 if(['/db.js','/server.js','/package.json','/package-lock.json'].includes(pathname)||pathname.startsWith('/.')){res.writeHead(404);return res.end('Não encontrado')}
 const file=path.resolve(root,'.'+pathname);if(file!==root&&!file.startsWith(root+path.sep)){res.writeHead(403);return res.end('Acesso negado')}
-fs.readFile(file,(err,data)=>{if(err){res.writeHead(err.code==='ENOENT'?404:500);return res.end('Arquivo indisponível')}const type=mime[path.extname(file)]||'application/octet-stream';if(type.startsWith('text/html'))data=Buffer.from(data.toString('utf8').replace('</head>','<link rel="stylesheet" href="/css/stories.css"><link rel="stylesheet" href="/css/ranking.css"><link rel="stylesheet" href="/css/book-reader.css"><link rel="stylesheet" href="/css/publication-formats.css"><link rel="stylesheet" href="/css/denuncias.css"><script defer src="/js/avatar.js"></script><script defer src="/js/stories.js"></script><script defer src="/js/ranking.js"></script><script defer src="/js/book-reader.js"></script><script defer src="/js/publication-formats.js"></script><script defer src="/js/publication-format-privacy.js"></script><script defer src="/js/denuncias.js"></script><link rel="stylesheet" href="/css/prestige.css"><script defer src="/js/prestige.js"></script></head>'));res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff',...(pathname==='/gestao.html'?{'Cache-Control':'no-store, private, max-age=0','X-Frame-Options':'DENY','Referrer-Policy':'same-origin','Content-Security-Policy':"default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'"}:{})});res.end(data)})
+fs.readFile(file,(err,data)=>{if(err){res.writeHead(err.code==='ENOENT'?404:500);return res.end('Arquivo indisponível')}const type=mime[path.extname(file)]||'application/octet-stream';if(type.startsWith('text/html'))data=Buffer.from(data.toString('utf8').replace('</head>','<link rel="stylesheet" href="/css/stories.css"><link rel="stylesheet" href="/css/ranking.css"><link rel="stylesheet" href="/css/book-reader.css"><link rel="stylesheet" href="/css/publication-formats.css"><link rel="stylesheet" href="/css/denuncias.css"><link rel="stylesheet" href="/css/user-moderation.css"><script defer src="/js/avatar.js"></script><script defer src="/js/stories.js"></script><script defer src="/js/ranking.js"></script><script defer src="/js/book-reader.js"></script><script defer src="/js/publication-formats.js"></script><script defer src="/js/publication-format-privacy.js"></script><script defer src="/js/denuncias.js"></script><script defer src="/js/user-moderation.js"></script><link rel="stylesheet" href="/css/prestige.css"><script defer src="/js/prestige.js"></script></head>'));res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff',...(pathname==='/gestao.html'?{'Cache-Control':'no-store, private, max-age=0','X-Frame-Options':'DENY','Referrer-Policy':'same-origin','Content-Security-Policy':"default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'"}:{})});res.end(data)})
 }).listen(port,'0.0.0.0',()=>console.log('Art em Foco online na porta '+port));
 
 setInterval(()=>getDatabase().then(stories.maintenance).catch(()=>{}),60000).unref();

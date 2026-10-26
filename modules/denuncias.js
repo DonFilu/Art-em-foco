@@ -5,7 +5,7 @@ const TYPES=new Set(['post','comment','reply','story','profile']);
 const REASONS=new Set(['spam','harassment','inappropriate','copyright','ai_misrepresentation','other']);
 const STATUSES=new Set(['received','reviewing','resolved','archived']);
 const OPEN=new Set(['received','reviewing']);
-const PAGE=20,MAX_TEXT=1000;
+const PAGE=20,MAX_TEXT=1000,ACTION_LEASE_MS=90*1000;
 let indexesReady;
 const validObjectId=value=>typeof value==='string'&&/^[a-f0-9]{24}$/i.test(value);
 const validArtist=value=>typeof value==='string'&&/^AEF-\d{8,}$/.test(value);
@@ -22,7 +22,8 @@ async function ensureIndexes(db){if(!indexesReady)indexesReady=Promise.all([
  db.collection('reports').createIndex({targetType:1,targetId:1,status:1,createdAt:-1}),
  db.collection('reports').createIndex({reporterId:1,targetType:1,targetId:1,open:1},{unique:true,partialFilterExpression:{open:true}}),
  db.collection('reports').createIndex({status:1,createdAt:-1}),
- db.collection('reports').createIndex({reportedAuthorId:1,createdAt:-1})
+ db.collection('reports').createIndex({reportedAuthorId:1,createdAt:-1}),
+ db.collection('reports').createIndex({'administrativeAction.leaseExpiresAt':1})
  ]).catch(error=>{indexesReady=null;throw error});return indexesReady}
 async function targetFor(db,user,body,canViewArt){
  const type=body?.type,id=body?.targetId;if(!TYPES.has(type))throw Error('Tipo de conteúdo inválido');
@@ -61,11 +62,52 @@ async function update(db,admin,protocolValue,body){
 }
 async function detail(db,protocolValue){const row=await db.collection('reports').findOne({protocol:protocolValue});if(!row)return null;const ids=[row.reporterId],users=await db.collection('users').find({_id:{$in:ids}},{projection:{artId:1,displayName:1,username:1}}).toArray(),reporter=users[0]?{id:users[0].artId,name:users[0].displayName||users[0].username||users[0].artId}:null;const related=await db.collection('reports').countDocuments({targetType:row.targetType,targetId:row.targetId});return {...row,reporter,related};}
 async function removeByAdmin(db,admin,protocolValue,body,discardEvidence){if(!validProtocol(protocolValue)||body?.confirm!==true)throw Error('Confirmação de exclusão inválida');const audit=await db.collection('admin_audit').insertOne({type:'report_delete',adminUserId:admin.user._id,reportProtocol:protocolValue,at:new Date(),outcome:'requested'}),removed=await db.collection('reports').findOneAndDelete({protocol:protocolValue});if(!removed){await db.collection('admin_audit').updateOne({_id:audit.insertedId},{$set:{outcome:'not_found',completedAt:new Date()}});throw Error('Denúncia não encontrada')}await db.collection('admin_audit').updateOne({_id:audit.insertedId},{$set:{outcome:'deleted',completedAt:new Date()}});try{await discardEvidence(db,(removed.evidence?.media||[]).map(media=>media.fileId))}catch{await db.collection('admin_audit').updateOne({_id:audit.insertedId},{$set:{evidenceCleanup:'deferred'}})}return true}
-async function route(req,res,pathname,{sessionUser,getDatabase,json,readJSON,canViewArt,gestao,capturePostEvidence,readReportEvidence,releaseReportEvidenceClaims,discardReportEvidence}){
+async function acquireActionLease(db,protocolValue,adminId){const now=new Date(),leaseId=crypto.randomUUID(),expiresAt=new Date(now.getTime()+ACTION_LEASE_MS),report=await db.collection('reports').findOneAndUpdate({protocol:protocolValue,$or:[{'administrativeAction.leaseExpiresAt':{$exists:false}},{'administrativeAction.leaseExpiresAt':{$lte:now}}]},{$set:{'administrativeAction.leaseId':leaseId,'administrativeAction.leaseExpiresAt':expiresAt,'administrativeAction.adminId':adminId,'administrativeAction.startedAt':now}},{returnDocument:'after'});return report?{report,leaseId}:null}
+async function renewActionLease(db,id,leaseId){const result=await db.collection('reports').updateOne({_id:id,'administrativeAction.leaseId':leaseId,'administrativeAction.leaseExpiresAt':{$gt:new Date()}},{$set:{'administrativeAction.leaseExpiresAt':new Date(Date.now()+ACTION_LEASE_MS),'administrativeAction.updatedAt':new Date()}});if(!result.modifiedCount)throw Error('A decisão perdeu o bloqueio de segurança; revise o estado antes de tentar novamente')}
+async function releaseActionLease(db,id,leaseId,error=''){const update=error?{$set:{'administrativeAction.lastError':error.slice(0,500),'administrativeAction.updatedAt':new Date()},$unset:{'administrativeAction.leaseId':'','administrativeAction.leaseExpiresAt':'','administrativeAction.adminId':''}}:{$unset:{'administrativeAction.leaseId':'','administrativeAction.leaseExpiresAt':'','administrativeAction.adminId':''}};await db.collection('reports').updateOne({_id:id,'administrativeAction.leaseId':leaseId},update)}
+async function applyAdministrativeAction(db,admin,protocolValue,body,moderation,removeContent){
+ if(!validProtocol(protocolValue)||body?.confirm!==true)throw Error('Confirmação das ações inválida');
+ await moderation.ensureIndexes(db);const actions=body.actions||{};
+ if(!actions||typeof actions!=='object'||Array.isArray(actions))throw Error('Ações inválidas');
+ const remove=actions.removeContent===true,warn=actions.warning===true,ban=actions.ban===true,unban=actions.unban===true;
+ if(!remove&&!warn&&!ban&&!unban&&!body.status)throw Error('Selecione ao menos uma decisão');
+ if(ban&&unban)throw Error('Decisão de banimento inválida');
+ if(body.status&&!STATUSES.has(body.status))throw Error('Status inválido');
+ const justification=text(body.justification,'Justificativa administrativa');
+ if((remove||warn||ban||unban)&&!justification)throw Error('Escreva uma justificativa administrativa');
+ const claimed=await acquireActionLease(db,protocolValue,admin.user._id);
+ if(!claimed)throw Error('Esta denúncia está sendo processada por outro administrador');
+ const {report,leaseId}=claimed;
+ try{
+  const target=await db.collection('users').findOne({artId:report.reportedAuthorId});
+  if(!target)throw Error('Usuário denunciado não encontrado');
+  const results=[];
+  if(remove){
+   if(!['post','comment','reply','story'].includes(report.targetType))throw Error('Este tipo de conteúdo não pode ser excluído por esta ação');
+   await renewActionLease(db,report._id,leaseId);
+   const outcome=await removeContent(db,report,admin,justification);
+   await renewActionLease(db,report._id,leaseId);
+   if(outcome!=='deleted')throw Error(outcome==='missing'?'O conteúdo já foi excluído ou não está disponível':'Não foi possível excluir o conteúdo');
+   results.push('conteúdo excluído');
+  }
+  if(warn){await renewActionLease(db,report._id,leaseId);await moderation.applyWarning(db,admin,target,report.protocol,justification);results.push('advertência registrada')}
+  if(ban){await renewActionLease(db,report._id,leaseId);await moderation.setBan(db,admin,target,report.protocol,justification,true);results.push('banimento aplicado')}
+  if(unban){await renewActionLease(db,report._id,leaseId);await moderation.setBan(db,admin,target,report.protocol,justification,false);results.push('banimento revertido')}
+  const now=new Date(),status=body.status||report.status,open=OPEN.has(status),decision={at:now,adminId:admin.user._id,actions:{removeContent:remove,warning:warn,ban,unban},justification,result:results};
+  const committed=await db.collection('reports').updateOne({_id:report._id,'administrativeAction.leaseId':leaseId,'administrativeAction.leaseExpiresAt':{$gt:new Date()}},{$set:{status,open,updatedAt:now,completedAt:open?null:now,'administrativeAction.completedAt':now,'administrativeAction.results':results},$unset:{'administrativeAction.leaseId':'','administrativeAction.leaseExpiresAt':'','administrativeAction.adminId':''},$push:{administrativeDecisions:decision,history:{at:now,statusFrom:report.status,statusTo:status,adminId:admin.user._id,public:false}}});
+  if(!committed.modifiedCount)throw Error('A decisão perdeu o bloqueio de segurança; revise o estado antes de tentar novamente');
+  await moderation.writeAudit?.(db,{type:'report_decision',adminUserId:admin.user._id,targetUserId:target._id,targetGoogleSub:target.googleSub,reportProtocol:report.protocol,action:decision.actions,result:results.join(',')});
+  return {results};
+ }catch(error){
+  await releaseActionLease(db,report._id,leaseId,error.message||'Falha na decisão').catch(()=>{});
+  throw error;
+ }
+}
+async function route(req,res,pathname,{sessionUser,getDatabase,json,readJSON,canViewArt,gestao,capturePostEvidence,readReportEvidence,releaseReportEvidenceClaims,discardReportEvidence,moderation,removeContent}){
  const adminPath=pathname.startsWith('/api/gestao/denuncias'),minePath=pathname.startsWith('/api/denuncias');if(!adminPath&&!minePath)return false;
  try{const params=new URL(req.url,'http://localhost').searchParams;if(adminPath&&!gestao.configured())return json(res,403,{error:'Acesso administrativo indisponível'}),true;if(!adminPath&&!await sessionUser(req))return json(res,401,{error:'Entre com Google para acessar denúncias'}),true;const db=await getDatabase();await ensureIndexes(db);
-  if(adminPath){const admin=await gestao.requireAdmin(req,res,db,sessionUser,json,{csrf:req.method!=='GET'});if(!admin)return true;const evidenceMatch=/^\/api\/gestao\/denuncias\/evidence\/([a-f0-9]{24})$/.exec(pathname);if(evidenceMatch){if(req.method!=='GET')return json(res,405,{error:'Método não permitido'}),true;const referenced=await db.collection('reports').findOne({'evidence.media.fileId':evidenceMatch[1]},{projection:{_id:1}});if(!referenced)return json(res,404,{error:'Evidência não encontrada'}),true;const media=await readReportEvidence(db,evidenceMatch[1]);if(!media)return json(res,404,{error:'Evidência não encontrada'}),true;res.writeHead(200,{'Content-Type':media.mime,'Content-Length':media.bytes.length,'Cache-Control':'private, no-store, max-age=0','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'X-Frame-Options':'DENY'});res.end(media.bytes);return true}if(pathname==='/api/gestao/denuncias'&&req.method==='GET'){const counts=await db.collection('reports').aggregate([{$group:{_id:'$status',count:{$sum:1}}}]).toArray(),summary={total:0,received:0,reviewing:0,resolved:0,archived:0};for(const count of counts){summary[count._id]=count.count;summary.total+=count.count}return json(res,200,{summary,...await adminList(db,params)}),true}const match=/^\/api\/gestao\/denuncias\/(RPT-[A-F0-9]{12})$/.exec(pathname);if(!match)return json(res,404,{error:'Denúncia não encontrada'}),true;if(req.method==='GET'){const row=await detail(db,match[1]);return row?json(res,200,{report:row}):json(res,404,{error:'Denúncia não encontrada'}),true}if(req.method==='PATCH'){await update(db,admin,match[1],await readJSON(req));return json(res,200,{ok:true}),true}if(req.method==='DELETE'){await removeByAdmin(db,admin,match[1],await readJSON(req),discardReportEvidence);return json(res,200,{ok:true}),true}return json(res,405,{error:'Método não permitido'}),true}
+  if(adminPath){const admin=await gestao.requireAdmin(req,res,db,sessionUser,json,{csrf:req.method!=='GET'});if(!admin)return true;const evidenceMatch=/^\/api\/gestao\/denuncias\/evidence\/([a-f0-9]{24})$/.exec(pathname);if(evidenceMatch){if(req.method!=='GET')return json(res,405,{error:'Método não permitido'}),true;const referenced=await db.collection('reports').findOne({'evidence.media.fileId':evidenceMatch[1]},{projection:{_id:1}});if(!referenced)return json(res,404,{error:'Evidência não encontrada'}),true;const media=await readReportEvidence(db,evidenceMatch[1]);if(!media)return json(res,404,{error:'Evidência não encontrada'}),true;res.writeHead(200,{'Content-Type':media.mime,'Content-Length':media.bytes.length,'Cache-Control':'private, no-store, max-age=0','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'X-Frame-Options':'DENY'});res.end(media.bytes);return true}if(pathname==='/api/gestao/denuncias'&&req.method==='GET'){const counts=await db.collection('reports').aggregate([{$group:{_id:'$status',count:{$sum:1}}}]).toArray(),summary={total:0,received:0,reviewing:0,resolved:0,archived:0};for(const count of counts){summary[count._id]=count.count;summary.total+=count.count}return json(res,200,{summary,...await adminList(db,params)}),true}const actionMatch=/^\/api\/gestao\/denuncias\/(RPT-[A-F0-9]{12})\/actions$/.exec(pathname);if(actionMatch){if(req.method!=='POST')return json(res,405,{error:'Método não permitido'}),true;return json(res,200,await applyAdministrativeAction(db,admin,actionMatch[1],await readJSON(req),moderation,removeContent)),true}const match=/^\/api\/gestao\/denuncias\/(RPT-[A-F0-9]{12})$/.exec(pathname);if(!match)return json(res,404,{error:'Denúncia não encontrada'}),true;if(req.method==='GET'){const row=await detail(db,match[1]);return row?json(res,200,{report:row}):json(res,404,{error:'Denúncia não encontrada'}),true}if(req.method==='PATCH'){await update(db,admin,match[1],await readJSON(req));return json(res,200,{ok:true}),true}if(req.method==='DELETE'){await removeByAdmin(db,admin,match[1],await readJSON(req),discardReportEvidence);return json(res,200,{ok:true}),true}return json(res,405,{error:'Método não permitido'}),true}
   const user=await sessionUser(req);if(pathname==='/api/denuncias'){if(req.method==='POST')return json(res,201,await submit(db,user,await readJSON(req),canViewArt,capturePostEvidence,releaseReportEvidenceClaims,discardReportEvidence)),true;if(req.method==='GET')return json(res,200,await mine(db,user,params)),true;return json(res,405,{error:'Método não permitido'}),true}const match=/^\/api\/denuncias\/(RPT-[A-F0-9]{12})$/.exec(pathname);if(!match||req.method!=='GET')return json(res,404,{error:'Denúncia não encontrada'}),true;const row=await db.collection('reports').findOne({protocol:match[1],reporterId:user._id});return row?json(res,200,{report:publicReport(row)}):json(res,404,{error:'Denúncia não encontrada'}),true;
  }catch(error){const status=error.status||(/inválid|encontrado|acesso|próprio|Descrição|Observação|Resposta|Intervalo/i.test(error.message)?400:503);return json(res,status,{error:error.message||'Não foi possível processar a denúncia'}),true}
 }
-module.exports={route,submit,targetFor,publicReport,adminFilter,update,removeByAdmin,REASONS,TYPES,STATUSES};
+module.exports={route,submit,targetFor,publicReport,adminFilter,update,removeByAdmin,applyAdministrativeAction,acquireActionLease,renewActionLease,ACTION_LEASE_MS,REASONS,TYPES,STATUSES};
