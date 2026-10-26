@@ -2,6 +2,7 @@
 const assert=require('node:assert/strict');
 const {test}=require('node:test');
 const reports=require('../modules/denuncias');
+const moderation=require('../modules/user-moderation');
 const source=require('node:fs').readFileSync(require.resolve('../modules/denuncias'),'utf8');
 
 test('public report details never expose reporter identity, evidence, or internal notes',()=>{
@@ -61,4 +62,26 @@ test('administrative deletion requires confirmation, audits the operation, and o
  await reports.removeByAdmin(db,{user:{_id:'admin'}},'RPT-ABCDEF123456',{confirm:true},async(_db,ids)=>discarded.push(...ids));
  assert.deepEqual(discarded,['d'.repeat(24)]);
  assert.equal(updates.some(update=>update.$set?.outcome==='deleted'),true);
+});
+test('administrative decisions are locked, require justification, and record independent actions',async()=>{
+ const report={_id:'report-id',protocol:'RPT-ABCDEF123456',targetType:'post',targetId:'a'.repeat(24),reportedAuthorId:'AEF-00000002',status:'received'};
+ const updates=[],calls=[];
+ const db={collection:name=>name==='reports'?{findOneAndUpdate:async()=>report,updateOne:async(_query,update)=>updates.push(update)}:name==='users'?{findOne:async()=>({_id:'target',googleSub:'123456789012',artId:'AEF-00000002'})}:{}};
+ const service={ensureIndexes:async()=>{},applyWarning:async(...args)=>calls.push(['warning',args]),setBan:async(...args)=>calls.push(['ban',args]),writeAudit:async(...args)=>calls.push(['audit',args])};
+ await assert.rejects(()=>reports.applyAdministrativeAction(db,{user:{_id:'admin'}},report.protocol,{confirm:true,actions:{warning:true},justification:''},service,async()=>{}),/justificativa/i);
+ const result=await reports.applyAdministrativeAction(db,{user:{_id:'admin'}},report.protocol,{confirm:true,status:'resolved',justification:'Violação confirmada',actions:{removeContent:true,warning:true,ban:true}},service,async()=>{calls.push(['remove']);return 'deleted'});
+ assert.deepEqual(result.results,['conteúdo excluído','advertência registrada','banimento aplicado']);
+ assert.equal(calls.filter(call=>call[0]==='remove').length,1);
+ assert.equal(calls.filter(call=>call[0]==='warning').length,1);
+ assert.equal(calls.filter(call=>call[0]==='ban').length,1);
+ assert.match(JSON.stringify(updates),/administrativeDecisions/);
+});
+test('warning acknowledgement is bound to the affected account and audit uses a separate persistent collection',async()=>{
+ const calls=[];
+ const db={collection:name=>({createIndex:async()=>{},findOneAndUpdate:async(query,update)=>{calls.push([name,query,update]);return {_id:'warning',reportProtocol:'RPT-ABCDEF123456'}},insertOne:async row=>calls.push([name,row])})};
+ let response;
+ await moderation.route({method:'POST',url:'/api/moderation/warnings/'+'a'.repeat(24)+'/acknowledge',headers:{}},{},'/api/moderation/warnings/'+'a'.repeat(24)+'/acknowledge',{sessionUser:async()=>({_id:'user',googleSub:'123'}),getDatabase:async()=>db,json:(_res,status,body)=>{response={status,body}},readJSON:async()=>({})});
+ assert.equal(response.status,200);
+ assert.equal(calls.some(([name,query])=>name==='user_warnings'&&query?.userId==='user'),true);
+ assert.equal(calls.some(([name])=>name==='moderation_audit'),true);
 });
