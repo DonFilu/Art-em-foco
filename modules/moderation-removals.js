@@ -11,7 +11,7 @@ async function ensureIndexes(db){
  return indexes;
 }
 async function acquire(db,report,files,now=new Date()){
- await ensureIndexes(db);const jobs=db.collection('moderation_content_removals'),leaseId=crypto.randomUUID(),expiresAt=new Date(now.getTime()+LEASE_MS),seed={reportProtocol:report.protocol,targetType:report.targetType,targetId:report.targetId,authorId:report.reportedAuthorId,files,deletedFileIds:[],state:'pending',createdAt:now};
+ await ensureIndexes(db);const jobs=db.collection('moderation_content_removals'),leaseId=crypto.randomUUID(),expiresAt=new Date(now.getTime()+LEASE_MS),seed={reportProtocol:report.protocol,targetType:report.targetType,targetId:report.targetId,authorId:report.reportedAuthorId,files,deletedFileIds:[],createdAt:now};
  try{
   const job=await jobs.findOneAndUpdate({reportProtocol:report.protocol,targetType:report.targetType,targetId:report.targetId,state:{$ne:'completed'},$or:[{leaseExpiresAt:{$exists:false}},{leaseExpiresAt:{$lte:now}}]},{$setOnInsert:seed,$set:{leaseId,leaseExpiresAt:expiresAt,updatedAt:now,lastAttemptAt:now,state:'processing'}},{upsert:true,returnDocument:'after'});
   return job?{job,leaseId}:null;
