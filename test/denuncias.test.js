@@ -112,3 +112,20 @@ test('a lost report-action lease aborts before a second administrative mutation'
  const db={collection:()=>({updateOne:async()=>({modifiedCount:0})})};
  await assert.rejects(()=>reports.renewActionLease(db,'report','lease'),/perdeu o bloqueio/);
 });
+test('an expired removal lease cannot be renewed, failed, or completed by its former owner',async()=>{
+ const queries=[];const db={collection:()=>({updateOne:async query=>{queries.push(query);return {modifiedCount:0}}})};
+ await assert.rejects(()=>removals.renew(db,'job','lease'),/perdeu o bloqueio/);
+ assert.match(JSON.stringify(queries[0]),/leaseExpiresAt/);
+ assert.match(JSON.stringify(queries[0]),/\$gt/);
+});
+test('lease loss during an external delete does not finalize or mark a stale operation complete',async()=>{
+ let calls=0,finalized=false;
+ const collection={createIndex:async()=>{},findOneAndUpdate:async()=>({_id:'job',files:['cover'],deletedFileIds:[],leaseId:'lease',state:'processing'}),updateOne:async()=>({modifiedCount:++calls===3?0:1})};
+ const result=await removals.runPostRemoval({collection:()=>collection},{protocol:'RPT-ABCDEF123456',targetType:'post',targetId:'a'.repeat(24),reportedAuthorId:'AEF-00000002'},['cover'],{removeFile:async()=>({deleted:true}),finalize:async()=>{finalized=true}});
+ assert.equal(result.state,'pending');assert.equal(finalized,false);
+});
+test('a missing ImageKit file is journaled as already absent and does not block the remaining pages',async()=>{
+ let job;const collection={createIndex:async()=>{},findOneAndUpdate:async(_q,update)=>{job={_id:'job',...(job||update.$setOnInsert),...(update.$set||{})};return {...job,deletedFileIds:[...(job.deletedFileIds||[])]}},updateOne:async(_q,update)=>{if(update.$addToSet?.deletedFileIds)job.deletedFileIds.push(update.$addToSet.deletedFileIds);return {modifiedCount:1}}};
+ const seen=[];const result=await removals.runPostRemoval({collection:()=>collection},{protocol:'RPT-ABCDEF123456',targetType:'post',targetId:'a'.repeat(24),reportedAuthorId:'AEF-00000002'},['cover','page-2'],{removeFile:async file=>{seen.push(file);return file==='cover'?{alreadyMissing:true}:{deleted:true}},finalize:async()=>{}});
+ assert.equal(result.state,'deleted');assert.deepEqual(seen,['cover','page-2']);
+});
