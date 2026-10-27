@@ -9,11 +9,11 @@ async function apply(db,event){
  const object=event.data?.object||{},row=await repository.paymentForStripeObject(db,object);if(!row)return;
  if(event.type==='checkout.session.completed'||event.type==='checkout.session.async_payment_succeeded'){
   if(object.payment_status==='paid')await repository.markPaid(db,row,{sessionId:object.id,paymentIntent:typeof object.payment_intent==='string'?object.payment_intent:null});
- }else if(event.type==='checkout.session.expired')await repository.adjustPayment(db,row,{status:'expired',netAmountCents:0});
- else if(event.type==='payment_intent.payment_failed')await repository.adjustPayment(db,row,{status:'failed',netAmountCents:0,paymentIntent:object.id});
- else if(event.type==='charge.refunded')await repository.adjustPayment(db,row,{status:object.refunded?'refunded':'partially_refunded',netAmountCents:Math.max(0,row.amountCents-(object.amount_refunded||0)),paymentIntent:object.payment_intent});
- else if(event.type==='charge.dispute.created')await repository.adjustPayment(db,row,{status:'disputed',netAmountCents:0,paymentIntent:object.payment_intent});
- else if(event.type==='charge.dispute.closed'&&object.status==='won')await repository.adjustPayment(db,row,{status:'paid',netAmountCents:row.amountCents,paymentIntent:object.payment_intent});
+ }else if(event.type==='checkout.session.expired')await repository.adjustPayment(db,row,{status:'expired',netAmountCents:0,from:['creating','pending']});
+ else if(event.type==='payment_intent.payment_failed')await repository.adjustPayment(db,row,{status:'failed',netAmountCents:0,paymentIntent:object.id,from:['creating','pending']});
+ else if(event.type==='charge.refunded')await repository.adjustPayment(db,row,{status:object.refunded?'refunded':'partially_refunded',netAmountCents:Math.max(0,row.amountCents-(object.amount_refunded||0)),paymentIntent:object.payment_intent,from:['paid','partially_refunded']});
+ else if(event.type==='charge.dispute.created')await repository.adjustPayment(db,row,{status:'disputed',netAmountCents:0,paymentIntent:object.payment_intent,from:['paid','partially_refunded']});
+ else if(event.type==='charge.dispute.closed'&&object.status==='won')await repository.adjustPayment(db,row,{status:'paid',netAmountCents:row.amountCents,paymentIntent:object.payment_intent,from:['disputed']});
 }
 async function process(db,raw,signature){
  if(!configured())throw Object.assign(Error('Webhook de pagamentos não configurado'),{status:503});

@@ -60,3 +60,9 @@ test('a signed paid Checkout webhook is confirmed once and repeated delivery is 
   assert.ok(updates.some(([name])=>name==='donation_payments'));
  }finally{if(old.key===undefined)delete process.env.STRIPE_SECRET_KEY;else process.env.STRIPE_SECRET_KEY=old.key;if(old.secret===undefined)delete process.env.STRIPE_WEBHOOK_SECRET;else process.env.STRIPE_WEBHOOK_SECRET=old.secret}
 });
+
+test('a late paid event cannot restore a refunded or disputed donation confirmation',async()=>{
+ const calls=[];const db={collection:name=>({updateOne:async(query)=>{calls.push([name,query]);return {modifiedCount:0}}})},row={_id:'payment-1',amountCents:500,status:'refunded',netAmountCents:0,stripePaymentIntentId:'pi_refunded'};
+ assert.equal(await repository.markPaid(db,row,{paymentIntent:'pi_refunded'}),false);
+ assert.equal(calls.filter(([name])=>name==='donation_confirmations').length,0);
+});
