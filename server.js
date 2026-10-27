@@ -18,6 +18,7 @@ const gestao=require('./modules/gestao');
 const denuncias=require('./modules/denuncias');
 const moderation=require('./modules/user-moderation');
 const moderationRemovals=require('./modules/moderation-removals');
+const donations=require('./modules/donations');
 const {avatarInfo}=require('./modules/avatars');
 const ART_MAX=5*1024*1024;
 // Cache apenas de artes públicas: reduz leituras repetidas no ImageKit sem armazenar obras privadas.
@@ -122,6 +123,7 @@ function privateArtURL(url,feed=false){
 
 function json(res,status,body,headers={}){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers});res.end(JSON.stringify(body))}
 async function readJSON(req){let data='';for await(const chunk of req){data+=chunk;if(data.length>12000)throw new Error('Requisição muito grande')}return JSON.parse(data)}
+async function readRaw(req,max){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>max)throw Object.assign(Error('Requisição muito grande'),{status:413});chunks.push(chunk)}return Buffer.concat(chunks)}
 function cookies(req){return Object.fromEntries((req.headers.cookie||'').split(';').map(s=>s.trim().split('=').map(decodeURIComponent)).filter(a=>a.length===2))}
 function cookie(token,maxAge){return 'aef_session='+encodeURIComponent(token||'')+'; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age='+maxAge}
 function safeUser(u){const resolved=avatarInfo(u);return {id:u.artId,name:u.displayName,picture:'',email:u.email||'',username:u.username||u.artId.toLowerCase(),bio:u.bio||'',createdAt:u.createdAt,role:u.role||'artist',socials:u.socials||{},avatar:u.avatar||'',cover:u.cover||'',avatarUrl:resolved.avatar,avatarFallback:resolved.avatarFallback,avatarVersion:resolved.avatarVersion}}
@@ -164,7 +166,8 @@ async function discordImageBytes(ref){
  return {bytes,mime:ref.mime||'image/png'};
 }
 
-async function sessionUser(req){const token=cookies(req).aef_session;if(!token||! /^[a-f0-9]{64}$/.test(token))return null;const db=await getDatabase();const session=await db.collection('sessions').findOne({_id:crypto.createHash('sha256').update(token).digest('hex'),expiresAt:{$gt:new Date()}});if(!session)return null;return db.collection('users').findOne({_id:session.userId})}
+async function sessionInfo(req){const token=cookies(req).aef_session;if(!token||! /^[a-f0-9]{64}$/.test(token))return null;const db=await getDatabase(),session=await db.collection('sessions').findOne({_id:crypto.createHash('sha256').update(token).digest('hex'),expiresAt:{$gt:new Date()}});if(!session)return null;const user=await db.collection('users').findOne({_id:session.userId});return user?{user,session}:null}
+async function sessionUser(req){return (await sessionInfo(req))?.user||null}
 async function ensureIndexes(db){await Promise.all([db.collection('users').createIndex({googleSub:1},{unique:true}),db.collection('users').createIndex({artId:1},{unique:true}),db.collection('users').createIndex({username:1},{unique:true,sparse:true}),db.collection('friendships').createIndex({pair:1},{unique:true}),db.collection('sessions').createIndex({expiresAt:1},{expireAfterSeconds:0}),db.collection('notifications').createIndex({userId:1,type:1},{unique:true}),db.collection('post_likes').createIndex({postId:1,userId:1},{unique:true}),db.collection('post_likes').createIndex({userId:1,postId:1}),db.collection('art_comments').createIndex({postId:1,parentId:1,_id:-1}),db.collection('comment_likes').createIndex({commentId:1,userId:1},{unique:true}),db.collection('comment_likes').createIndex({userId:1,commentId:1})])}
 async function addWelcomeFriends(db,newArtistId){
  // These are the official welcome accounts; override with CIDIO_ART_WELCOME_FRIEND_IDS if needed.
@@ -197,7 +200,7 @@ async function processWelcomeFriends(){
 }
 setInterval(()=>{void processWelcomeFriends()},1000).unref();
 void processWelcomeFriends();
-async function issueSession(db,user,res){const token=crypto.randomBytes(32).toString('hex');await db.collection('sessions').insertOne({_id:crypto.createHash('sha256').update(token).digest('hex'),userId:user._id,createdAt:new Date(),expiresAt:new Date(Date.now()+SESSION_MS)});return json(res,200,{user:safeUser(user)},{'Set-Cookie':cookie(token,SESSION_MS/1000)})}
+async function issueSession(db,user,res){const token=crypto.randomBytes(32).toString('hex');await db.collection('sessions').insertOne({_id:crypto.createHash('sha256').update(token).digest('hex'),userId:user._id,donationCsrfToken:crypto.randomBytes(32).toString('base64url'),createdAt:new Date(),expiresAt:new Date(Date.now()+SESSION_MS)});return json(res,200,{user:safeUser(user)},{'Set-Cookie':cookie(token,SESSION_MS/1000)})}
 http.createServer(async(req,res)=>{
 let pathname;try{pathname=decodeURIComponent(new URL(req.url,'http://localhost').pathname)}catch{return json(res,400,{error:'Requisição inválida'})}
 if(pathname==='/api/auth/config'){if(req.method!=='GET')return json(res,405,{error:'Método não permitido'});return json(res,200,{clientId:process.env.GOOGLE_CLIENT_ID||null})}
@@ -228,6 +231,7 @@ if(await moderation.route(req,res,pathname,{sessionUser,getDatabase,json,readJSO
 if(await notifications.route(req,res,pathname,{sessionUser,getDatabase,json}))return;
 if(await interactions.route(req,res,pathname,{sessionUser,getDatabase,json,canViewArt,notifications,ensureIndexes}))return;
 if(await stories.route(req,res,pathname,{sessionUser,getDatabase,json}))return;
+if(await donations.route(req,res,pathname,{sessionInfo,getDatabase,json,readJSON,readRaw}))return;
 if(await ranking.route(req,res,pathname,{sessionUser,getDatabase,json}))return;
 if(await badges.route(req,res,pathname,{sessionUser,getDatabase,json}))return;
 if(await denuncias.route(req,res,pathname,{sessionUser,getDatabase,json,readJSON,canViewArt,gestao,capturePostEvidence,readReportEvidence,releaseReportEvidenceClaims,discardReportEvidence,moderation,removeContent:removeReportedContent}))return;
@@ -426,11 +430,12 @@ if(pathname==='/politica-de-privacidade'||pathname==='/política-de-privacidade'
 if(pathname==='/termos-de-uso')pathname='/termos-de-uso.html';
 if(pathname==='/configuracoes'||pathname==='/configurações')pathname='/configuracoes.html';
 if(pathname==='/ranking')pathname='/ranking.html';
+if(pathname==='/doacoes'||pathname==='/doações')pathname='/doacoes.html';
 if(pathname==='/gestao')pathname='/gestao.html';
 if(pathname==='/minhas-denuncias')pathname='/minhas-denuncias.html';
 if(['/db.js','/server.js','/package.json','/package-lock.json'].includes(pathname)||pathname.startsWith('/.')){res.writeHead(404);return res.end('Não encontrado')}
 const file=path.resolve(root,'.'+pathname);if(file!==root&&!file.startsWith(root+path.sep)){res.writeHead(403);return res.end('Acesso negado')}
-fs.readFile(file,(err,data)=>{if(err){res.writeHead(err.code==='ENOENT'?404:500);return res.end('Arquivo indisponível')}const type=mime[path.extname(file)]||'application/octet-stream';if(type.startsWith('text/html'))data=Buffer.from(data.toString('utf8').replace('</head>','<link rel="stylesheet" href="/css/stories.css"><link rel="stylesheet" href="/css/ranking.css"><link rel="stylesheet" href="/css/book-reader.css"><link rel="stylesheet" href="/css/publication-formats.css"><link rel="stylesheet" href="/css/denuncias.css"><link rel="stylesheet" href="/css/user-moderation.css"><script defer src="/js/avatar.js"></script><script defer src="/js/stories.js"></script><script defer src="/js/ranking.js"></script><script defer src="/js/book-reader.js"></script><script defer src="/js/publication-formats.js"></script><script defer src="/js/publication-format-privacy.js"></script><script defer src="/js/denuncias.js"></script><script defer src="/js/user-moderation.js"></script><link rel="stylesheet" href="/css/prestige.css"><script defer src="/js/prestige.js"></script></head>'));res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff',...(pathname==='/gestao.html'?{'Cache-Control':'no-store, private, max-age=0','X-Frame-Options':'DENY','Referrer-Policy':'same-origin','Content-Security-Policy':"default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'"}:{})});res.end(data)})
+fs.readFile(file,(err,data)=>{if(err){res.writeHead(err.code==='ENOENT'?404:500);return res.end('Arquivo indisponível')}const type=mime[path.extname(file)]||'application/octet-stream';if(type.startsWith('text/html'))data=Buffer.from(data.toString('utf8').replace('</head>','<link rel="stylesheet" href="/css/stories.css"><link rel="stylesheet" href="/css/ranking.css"><link rel="stylesheet" href="/css/donations.css"><link rel="stylesheet" href="/css/book-reader.css"><link rel="stylesheet" href="/css/publication-formats.css"><link rel="stylesheet" href="/css/denuncias.css"><link rel="stylesheet" href="/css/user-moderation.css"><script defer src="/js/avatar.js"></script><script defer src="/js/stories.js"></script><script defer src="/js/ranking.js"></script><script defer src="/js/donations.js"></script><script defer src="/js/book-reader.js"></script><script defer src="/js/publication-formats.js"></script><script defer src="/js/publication-format-privacy.js"></script><script defer src="/js/denuncias.js"></script><script defer src="/js/user-moderation.js"></script><link rel="stylesheet" href="/css/prestige.css"><script defer src="/js/prestige.js"></script></head>'));res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff',...(pathname==='/gestao.html'?{'Cache-Control':'no-store, private, max-age=0','X-Frame-Options':'DENY','Referrer-Policy':'same-origin','Content-Security-Policy':"default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'"}:{})});res.end(data)})
 }).listen(port,'0.0.0.0',()=>console.log('Art em Foco online na porta '+port));
 
 setInterval(()=>getDatabase().then(stories.maintenance).catch(()=>{}),60000).unref();
