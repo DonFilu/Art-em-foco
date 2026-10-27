@@ -6,6 +6,7 @@ const test=require('node:test');
 const Stripe=require('stripe');
 const repository=require('../modules/donations/repository');
 const {sameOrigin}=require('../modules/donations');
+const checkout=require('../modules/donations/checkout');
 
 test('donation amounts are fixed server-side and points use confirmed BRL whole reais',()=>{
  assert.equal(repository.amount(500),500);
@@ -81,4 +82,39 @@ test('the donation panel queries availability and keeps checkout disabled when S
  const client=fs.readFileSync('js/donations.js','utf8'),routes=fs.readFileSync('modules/donations/index.js','utf8');
  assert.match(client,/api\/donations\/config/);assert.match(client,/Doações em breve/);
  assert.match(routes,/checkoutAvailable:checkout\.configured\(\)/);
+});
+
+test('Checkout defaults to card and only enables Pix through an explicit valid configuration',()=>{
+ const old=process.env.STRIPE_CHECKOUT_PAYMENT_METHODS;
+ try{
+  delete process.env.STRIPE_CHECKOUT_PAYMENT_METHODS;
+  assert.deepEqual(checkout.paymentMethods(),['card']);
+  process.env.STRIPE_CHECKOUT_PAYMENT_METHODS='card,pix';
+  assert.deepEqual(checkout.paymentMethods(),['card','pix']);
+  process.env.STRIPE_CHECKOUT_PAYMENT_METHODS='pix';
+  assert.equal(checkout.paymentMethods(),null);
+  process.env.STRIPE_CHECKOUT_PAYMENT_METHODS='card,unknown';
+  assert.equal(checkout.paymentMethods(),null);
+ }finally{if(old===undefined)delete process.env.STRIPE_CHECKOUT_PAYMENT_METHODS;else process.env.STRIPE_CHECKOUT_PAYMENT_METHODS=old}
+});
+
+test('Checkout records a failed operation and returns only safe Stripe diagnostics',async()=>{
+ const old={key:process.env.STRIPE_SECRET_KEY,base:process.env.CIDIO_ART_BASE_URL,methods:process.env.STRIPE_CHECKOUT_PAYMENT_METHODS};
+ const calls=[];
+ const db={collection(name){return {
+  createIndex:async()=>{},
+  findOneAndUpdate:async()=>({_id:'limit'}),
+  insertOne:async()=>({insertedId:'operation'}),
+  updateOne:async(query,change)=>{calls.push({name,query,change});return {modifiedCount:1}}
+ }}};
+ try{
+  process.env.STRIPE_SECRET_KEY='rk_live_test_value';process.env.CIDIO_ART_BASE_URL='https://art.cidio.com.br';delete process.env.STRIPE_CHECKOUT_PAYMENT_METHODS;
+  const requests=[];
+  const client={checkout:{sessions:{create:async request=>{requests.push(request);const error=Error('key must never reach a log');error.code='permission_denied';error.type='StripePermissionError';error.statusCode=403;error.requestId='req_safe';throw error}}}};
+  await assert.rejects(checkout.create(db,{_id:'user',artId:'AEF-00000001'},500,{client}),error=>{
+   assert.equal(error.status,503);assert.equal(error.donationError.stage,'create_checkout_session');assert.equal(error.donationError.code,'permission_denied');assert.equal(error.donationError.requestId,'req_safe');assert.doesNotMatch(error.message,/key/);return true;
+  });
+  assert.deepEqual(requests[0].payment_method_types,['card']);
+  assert.ok(calls.some(call=>call.name==='donation_payments'&&call.change.$set?.status==='failed'));
+ }finally{for(const [key,value] of Object.entries(old)){const env=key==='base'?'CIDIO_ART_BASE_URL':key==='methods'?'STRIPE_CHECKOUT_PAYMENT_METHODS':'STRIPE_SECRET_KEY';if(value===undefined)delete process.env[env];else process.env[env]=value}}
 });
