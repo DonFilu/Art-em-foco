@@ -22,6 +22,21 @@ async function commentsCount(db,postId){return db.collection('art_posts').findOn
 async function repliesCount(db,parentId){return db.collection('art_comments').findOne({_id:parentId},{projection:{repliesCount:1}}).then(row=>row?.repliesCount||0)}
 /* Idempotent: a retry after a partial failure only removes remaining records for this post. */
 async function cleanupPost(db,postId){const comments=await db.collection('art_comments').find({postId},{projection:{_id:1}}).toArray(),ids=comments.map(c=>c._id);if(ids.length)await db.collection('comment_likes').deleteMany({commentId:{$in:ids}});await db.collection('art_comments').deleteMany({postId});await db.collection('post_likes').deleteMany({postId})}
+/* Used only after the moderation archive was confirmed.  The caller supplies the
+ * exact reported comment, so this never performs an unscoped deletion. */
+async function removeCommentByModerator(db,id,authorId){
+ if(!validId(id))return {state:'missing'};
+ const comment=await db.collection('art_comments').findOne({_id:asId(id),authorId});
+ if(!comment)return {state:'missing'};
+ const query=comment.parentId?{_id:comment._id,authorId}:{postId:comment.postId,$or:[{_id:comment._id,authorId},{parentId:comment._id}]};
+ const removed=await db.collection('art_comments').find(query,{projection:{_id:1}}).toArray(),ids=removed.map(row=>row._id);
+ if(!ids.length)return {state:'missing'};
+ await db.collection('art_comments').deleteMany({_id:{$in:ids}});
+ await db.collection('comment_likes').deleteMany({commentId:{$in:ids}});
+ await db.collection('art_posts').updateOne({_id:comment.postId},[{$set:{commentCount:{$max:[0,{$subtract:[{$ifNull:['$commentCount',0]},ids.length]}]}}}]);
+ if(comment.parentId)await db.collection('art_comments').updateOne({_id:comment.parentId},[{$set:{repliesCount:{$max:[0,{$subtract:[{$ifNull:['$repliesCount',0]},1]}]}}}]);
+ return {state:'deleted',count:ids.length};
+}
 async function route(req,res,pathname,{sessionUser,getDatabase,json,canViewArt,notifications,ensureIndexes}){
  const match=/^\/api\/art\/posts\/([a-f0-9]{24})(?:\/(like)|\/(comments)(?:\/([a-f0-9]{24})(?:\/(replies|like))?)?)?$/.exec(pathname);
  if(!match)return false;
@@ -69,4 +84,4 @@ async function route(req,res,pathname,{sessionUser,getDatabase,json,canViewArt,n
   json(res,405,{error:'Método não permitido'});return true;
  }catch(e){const message=e.message||'Não foi possível processar a interação';const status=/comentário|resposta|mensagem|Requisição/i.test(message)?400:503;json(res,status,{error:message});return true}
 }
-module.exports={route,cleanupPost};
+module.exports={route,cleanupPost,removeCommentByModerator};
