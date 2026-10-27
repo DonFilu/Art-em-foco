@@ -2,7 +2,7 @@
 
 const {ObjectId}=require('mongodb');
 
-const AMOUNTS=Object.freeze([500,1000,2000,3000,5000,10000,20000,30000,50000,100000,200000,300000,500000]);
+const AMOUNTS=Object.freeze([100,1000,2000,3000,5000,10000,20000,30000,50000,100000,200000,300000,500000]);
 const CURRENCY='brl',POINTS_PER_REAL=10;
 
 function amount(value){
