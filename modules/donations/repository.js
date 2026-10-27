@@ -44,8 +44,8 @@ async function attachCheckout(db,id,session){
 async function failOperation(db,id){await db.collection('donation_payments').updateOne({_id:id,status:{$in:['creating','pending']}},{$set:{status:'failed',updatedAt:new Date()}})}
 
 async function paymentForStripeObject(db,obj){
- const sessionId=obj.object==='checkout.session'?obj.id:obj.metadata?.donationOperationId?null:null;
- const paymentIntent=typeof obj.payment_intent==='string'?obj.payment_intent:obj.payment_intent?.id||obj.id&&obj.object==='payment_intent'?obj.id:null;
+ const sessionId=obj.object==='checkout.session'&&typeof obj.id==='string'?obj.id:null;
+ const paymentIntent=typeof obj.payment_intent==='string'?obj.payment_intent:(typeof obj.payment_intent?.id==='string'?obj.payment_intent.id:(obj.object==='payment_intent'&&typeof obj.id==='string'?obj.id:null));
  const operationId=obj.metadata?.donationOperationId;
  const filters=[];
  if(sessionId)filters.push({stripeSessionId:sessionId});
@@ -59,14 +59,17 @@ async function markPaid(db,row,details={}){
  const now=new Date(),set={status:'paid',confirmedAt:row.confirmedAt||now,updatedAt:now,netAmountCents:row.amountCents};
  if(paymentIntent)set.stripePaymentIntentId=paymentIntent;
  if(details.sessionId)set.stripeSessionId=details.sessionId;
- await db.collection('donation_payments').updateOne({_id:row._id,status:{$nin:['refunded','disputed']}},{$set:set});
- if(!paymentIntent)return false;
+ const updated=await db.collection('donation_payments').updateOne({_id:row._id,status:{$nin:['refunded','partially_refunded','disputed']}},{$set:set});
+ // Events can arrive out of order. Never recreate a confirmation after a
+ // refund or dispute merely because Checkout delivers a late success event.
+ if(!updated.modifiedCount||!paymentIntent)return false;
  await db.collection('donation_confirmations').updateOne({stripePaymentIntentId:paymentIntent},{$setOnInsert:{userId:row.userId,artistId:row.artistId,amountCents:row.amountCents,currency:CURRENCY,confirmedAt:now,createdAt:now},$set:{status:'paid',netAmountCents:row.amountCents,updatedAt:now}},{upsert:true});
  return true;
 }
-async function adjustPayment(db,row,{status,netAmountCents,paymentIntent}){
+async function adjustPayment(db,row,{status,netAmountCents,paymentIntent,from}){
  if(!row)return false;const net=Math.max(0,Math.min(row.amountCents,Number(netAmountCents)||0)),intent=paymentIntent||row.stripePaymentIntentId;
- await db.collection('donation_payments').updateOne({_id:row._id},{$set:{status,netAmountCents:net,updatedAt:new Date(),...(intent?{stripePaymentIntentId:intent}:{})}});
+ const query={_id:row._id,...(from?{status:{$in:from}}:{})},updated=await db.collection('donation_payments').updateOne(query,{$set:{status,netAmountCents:net,updatedAt:new Date(),...(intent?{stripePaymentIntentId:intent}:{})}});
+ if(!updated.modifiedCount)return false;
  if(intent)await db.collection('donation_confirmations').updateOne({stripePaymentIntentId:intent},{$set:{status,netAmountCents:net,updatedAt:new Date()}},{upsert:false});
  return true;
 }
