@@ -24,7 +24,7 @@ async function state(db,user){
 async function writeAudit(db,row){await db.collection('moderation_audit').insertOne({...row,at:new Date()})}
 async function applyWarning(db,admin,targetUser,protocol,justification){
  const now=new Date(),result=await db.collection('user_warnings').updateOne({userId:targetUser._id,reportProtocol:protocol},{$setOnInsert:{userId:targetUser._id,googleSub:targetUser.googleSub,reportProtocol:protocol,justification,adminUserId:admin.user._id,createdAt:now,acknowledgedAt:null}},{upsert:true});
- if(result.upsertedCount)await writeAudit(db,{type:'warning_applied',adminUserId:admin.user._id,targetUserId:targetUser._id,targetGoogleSub:targetUser.googleSub,reportProtocol:protocol,justification,result:'applied'});
+ if(result.upsertedCount)await writeAudit(db,{type:'warning_applied',adminUserId:admin.user._id,adminGoogleSub:admin.user.googleSub,adminRole:admin.role,targetUserId:targetUser._id,targetGoogleSub:targetUser.googleSub,reportProtocol:protocol,justification,result:'applied'});
  return result.upsertedCount===1;
 }
 async function setBan(db,admin,targetUser,protocol,justification,active){
@@ -32,11 +32,11 @@ async function setBan(db,admin,targetUser,protocol,justification,active){
  if(active){
   const result=await db.collection('users').updateOne({_id:targetUser._id,'moderation.ban.active':{$ne:true}},{$set:{'moderation.ban':{active:true,justification,adminUserId:admin.user._id,reportProtocol:protocol,at:now},updatedAt:now}});
   await db.collection('sessions').deleteMany({userId:targetUser._id});
-  await writeAudit(db,{type:'ban_applied',adminUserId:admin.user._id,targetUserId:targetUser._id,targetGoogleSub:targetUser.googleSub,reportProtocol:protocol,justification,result:result.modifiedCount?'applied':'already_active'});
+  await writeAudit(db,{type:'ban_applied',adminUserId:admin.user._id,adminGoogleSub:admin.user.googleSub,adminRole:admin.role,targetUserId:targetUser._id,targetGoogleSub:targetUser.googleSub,reportProtocol:protocol,justification,result:result.modifiedCount?'applied':'already_active'});
   return result.modifiedCount===1;
  }
  const result=await db.collection('users').updateOne({_id:targetUser._id,'moderation.ban.active':true},{$set:{'moderation.ban.active':false,'moderation.ban.reversedAt':now,'moderation.ban.reversedBy':admin.user._id,updatedAt:now}});
- await writeAudit(db,{type:'ban_reversed',adminUserId:admin.user._id,targetUserId:targetUser._id,targetGoogleSub:targetUser.googleSub,reportProtocol:protocol,result:result.modifiedCount?'reversed':'not_active'});
+ await writeAudit(db,{type:'ban_reversed',adminUserId:admin.user._id,adminGoogleSub:admin.user.googleSub,adminRole:admin.role,targetUserId:targetUser._id,targetGoogleSub:targetUser.googleSub,reportProtocol:protocol,result:result.modifiedCount?'reversed':'not_active'});
  return result.modifiedCount===1;
 }
 async function route(req,res,pathname,{sessionUser,getDatabase,json,readJSON}){
