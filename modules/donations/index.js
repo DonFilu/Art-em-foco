@@ -5,6 +5,13 @@ const repository=require('./repository');
 const checkout=require('./checkout');
 const webhook=require('./webhook');
 
+function logDonationFailure(error,stage){
+ const details=error?.donationError||{};
+ // Keep production diagnostics actionable without recording payment details,
+ // credentials, session tokens, or user information.
+ console.error(JSON.stringify({event:'donation_checkout_failed',stage:details.stage||error?.donationStage||stage,code:details.code||null,type:details.type||null,stripeStatus:details.status||null,stripeRequestId:details.requestId||null,paymentMethodUnavailable:details.paymentMethodUnavailable===true}));
+}
+
 function sameOrigin(req){
  const origin=req.headers.origin;if(!origin)return false;
  try{return new URL(origin).host===String(req.headers.host||'').toLowerCase()&&new URL(origin).protocol==='https:'}catch{return false}
@@ -31,6 +38,11 @@ async function route(req,res,pathname,{sessionInfo,getDatabase,json,readJSON,rea
    return json(res,201,await checkout.create(db,info.user,body.amountCents)),true;
   }
   return json(res,405,{error:'Método não permitido'}),true;
- }catch(error){return json(res,error.status||(/valor|Pedido/.test(error.message)?400:503),{error:error.status===429?error.message:'Não foi possível processar a doação'}),true}
+ }catch(error){
+  const status=error.status||(/valor|Pedido/.test(error.message)?400:503);
+  if(pathname==='/api/donations/checkout'&&status>=500)logDonationFailure(error,'checkout_route');
+  const unavailable=error?.donationError?.paymentMethodUnavailable===true;
+  return json(res,status,{error:error.status===429?error.message:unavailable?'O método de pagamento não está disponível no momento. Tente novamente mais tarde.':'Não foi possível processar a doação'}),true
+ }
 }
-module.exports={route,sameOrigin,csrf};
+module.exports={route,sameOrigin,csrf,logDonationFailure};
