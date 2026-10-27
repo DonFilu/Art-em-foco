@@ -94,6 +94,13 @@ test('an expired administrative lease is recoverable',async()=>{
  assert.match(JSON.stringify(query),/leaseExpiresAt/);
  assert.match(JSON.stringify(query),/\$lte/);
 });
+test('new removal journal avoids MongoDB path conflicts between $setOnInsert and $set',async()=>{
+ let update;
+ const db={collection:()=>({createIndex:async()=>{},findOneAndUpdate:async(_query,value)=>{update=value;return {_id:'job',files:['cover'],deletedFileIds:[]}}})};
+ await removals.acquire(db,{protocol:'RPT-ABCDEF123456',targetType:'post',targetId:'a'.repeat(24),reportedAuthorId:'AEF-00000002'},['cover']);
+ assert.equal(Object.hasOwn(update.$setOnInsert,'state'),false);
+ assert.equal(update.$set.state,'processing');
+});
 test('post-removal journal resumes after a partial ImageKit failure without repeating pages',async()=>{
  let job;const collection={createIndex:async()=>{},findOneAndUpdate:async(_query,update)=>{if(!job)job={_id:'job',...update.$setOnInsert,...update.$set};else Object.assign(job,update.$set||{});return {...job,deletedFileIds:[...(job.deletedFileIds||[])]}},updateOne:async(_query,update)=>{if(update.$addToSet?.deletedFileIds&&!job.deletedFileIds.includes(update.$addToSet.deletedFileIds))job.deletedFileIds.push(update.$addToSet.deletedFileIds);if(update.$set)Object.assign(job,update.$set);if(update.$unset)for(const key of Object.keys(update.$unset))delete job[key];return {modifiedCount:1}}};
  const db={collection:()=>collection},report={protocol:'RPT-ABCDEF123456',targetType:'post',targetId:'a'.repeat(24),reportedAuthorId:'AEF-00000002'};
@@ -128,4 +135,14 @@ test('a missing ImageKit file is journaled as already absent and does not block 
  let job;const collection={createIndex:async()=>{},findOneAndUpdate:async(_q,update)=>{job={_id:'job',...(job||update.$setOnInsert),...(update.$set||{})};return {...job,deletedFileIds:[...(job.deletedFileIds||[])]}},updateOne:async(_q,update)=>{if(update.$addToSet?.deletedFileIds)job.deletedFileIds.push(update.$addToSet.deletedFileIds);return {modifiedCount:1}}};
  const seen=[];const result=await removals.runPostRemoval({collection:()=>collection},{protocol:'RPT-ABCDEF123456',targetType:'post',targetId:'a'.repeat(24),reportedAuthorId:'AEF-00000002'},['cover','page-2'],{removeFile:async file=>{seen.push(file);return file==='cover'?{alreadyMissing:true}:{deleted:true}},finalize:async()=>{}});
  assert.equal(result.state,'deleted');assert.deepEqual(seen,['cover','page-2']);
+});
+test('an archived report can resume post deletion and warning without sending a second archive',async()=>{
+ const report={_id:'report',protocol:'RPT-ABCDEF123456',targetType:'post',targetId:'a'.repeat(24),reportedAuthorId:'AEF-00000002',status:'resolved',moderationArchive:{confirmedAt:new Date()}};
+ const calls=[],updates=[];
+ const db={collection:name=>name==='reports'?{findOneAndUpdate:async()=>report,updateOne:async(_query,update)=>{updates.push(update);return {modifiedCount:1}}}:name==='users'?{findOne:async()=>({_id:'user',googleSub:'sub'})}:{}};
+ const service={ensureIndexes:async()=>{},applyWarning:async()=>calls.push('warning'),setBan:async()=>{},writeAudit:async()=>{}};
+ const result=await reports.applyAdministrativeAction(db,{user:{_id:'admin'}},report.protocol,{confirm:true,status:'resolved',justification:'Conteúdo impróprio',actions:{removeContent:true,warning:true}},service,async()=>{calls.push('remove');return 'deleted'});
+ assert.deepEqual(result.results,['conteúdo excluído','advertência registrada']);
+ assert.deepEqual(calls,['remove','warning']);
+ assert.equal(updates.some(update=>update.$push?.administrativeDecisions),true);
 });
