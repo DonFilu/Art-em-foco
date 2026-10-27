@@ -18,6 +18,7 @@ async function ensureIndexes(db){
  if(!indexes)indexes=Promise.all([
   db.collection('donation_payments').createIndex({stripeSessionId:1},{unique:true,sparse:true}),
   db.collection('donation_payments').createIndex({stripePaymentIntentId:1},{unique:true,sparse:true}),
+  db.collection('donation_payments').createIndex({stripeChargeId:1},{unique:true,sparse:true}),
   db.collection('donation_payments').createIndex({userId:1,createdAt:-1}),
   db.collection('donation_confirmations').createIndex({stripePaymentIntentId:1},{unique:true}),
   db.collection('donation_confirmations').createIndex({userId:1,confirmedAt:-1}),
@@ -44,12 +45,14 @@ async function attachCheckout(db,id,session){
 async function failOperation(db,id){await db.collection('donation_payments').updateOne({_id:id,status:{$in:['creating','pending']}},{$set:{status:'failed',updatedAt:new Date()}})}
 
 async function paymentForStripeObject(db,obj){
- const sessionId=obj.object==='checkout.session'?obj.id:obj.metadata?.donationOperationId?null:null;
- const paymentIntent=typeof obj.payment_intent==='string'?obj.payment_intent:obj.payment_intent?.id||obj.id&&obj.object==='payment_intent'?obj.id:null;
+ const sessionId=obj.object==='checkout.session'&&typeof obj.id==='string'?obj.id:null;
+ const paymentIntent=typeof obj.payment_intent==='string'?obj.payment_intent:(typeof obj.payment_intent?.id==='string'?obj.payment_intent.id:(obj.object==='payment_intent'&&typeof obj.id==='string'?obj.id:null));
+ const chargeId=obj.object==='charge'&&typeof obj.id==='string'?obj.id:(typeof obj.charge==='string'?obj.charge:null);
  const operationId=obj.metadata?.donationOperationId;
  const filters=[];
  if(sessionId)filters.push({stripeSessionId:sessionId});
  if(paymentIntent)filters.push({stripePaymentIntentId:paymentIntent});
+ if(chargeId)filters.push({stripeChargeId:chargeId});
  if(operationId&&ObjectId.isValid(operationId))filters.push({_id:new ObjectId(operationId)});
  return filters.length?db.collection('donation_payments').findOne({$or:filters}):null;
 }
@@ -59,14 +62,18 @@ async function markPaid(db,row,details={}){
  const now=new Date(),set={status:'paid',confirmedAt:row.confirmedAt||now,updatedAt:now,netAmountCents:row.amountCents};
  if(paymentIntent)set.stripePaymentIntentId=paymentIntent;
  if(details.sessionId)set.stripeSessionId=details.sessionId;
- await db.collection('donation_payments').updateOne({_id:row._id,status:{$nin:['refunded','disputed']}},{$set:set});
- if(!paymentIntent)return false;
+ if(details.chargeId)set.stripeChargeId=details.chargeId;
+ const updated=await db.collection('donation_payments').updateOne({_id:row._id,status:{$nin:['refunded','partially_refunded','disputed']}},{$set:set});
+ // Events can arrive out of order. Never recreate a confirmation after a
+ // refund or dispute merely because Checkout delivers a late success event.
+ if(!updated.modifiedCount||!paymentIntent)return false;
  await db.collection('donation_confirmations').updateOne({stripePaymentIntentId:paymentIntent},{$setOnInsert:{userId:row.userId,artistId:row.artistId,amountCents:row.amountCents,currency:CURRENCY,confirmedAt:now,createdAt:now},$set:{status:'paid',netAmountCents:row.amountCents,updatedAt:now}},{upsert:true});
  return true;
 }
-async function adjustPayment(db,row,{status,netAmountCents,paymentIntent}){
+async function adjustPayment(db,row,{status,netAmountCents,paymentIntent,chargeId,from}){
  if(!row)return false;const net=Math.max(0,Math.min(row.amountCents,Number(netAmountCents)||0)),intent=paymentIntent||row.stripePaymentIntentId;
- await db.collection('donation_payments').updateOne({_id:row._id},{$set:{status,netAmountCents:net,updatedAt:new Date(),...(intent?{stripePaymentIntentId:intent}:{})}});
+ const query={_id:row._id,...(from?{status:{$in:from}}:{})},updated=await db.collection('donation_payments').updateOne(query,{$set:{status,netAmountCents:net,updatedAt:new Date(),...(intent?{stripePaymentIntentId:intent}:{}),...(chargeId?{stripeChargeId:chargeId}:{})}});
+ if(!updated.modifiedCount)return false;
  if(intent)await db.collection('donation_confirmations').updateOne({stripePaymentIntentId:intent},{$set:{status,netAmountCents:net,updatedAt:new Date()}},{upsert:false});
  return true;
 }
