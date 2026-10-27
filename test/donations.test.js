@@ -66,3 +66,19 @@ test('a late paid event cannot restore a refunded or disputed donation confirmat
  assert.equal(await repository.markPaid(db,row,{paymentIntent:'pi_refunded'}),false);
  assert.equal(calls.filter(([name])=>name==='donation_confirmations').length,0);
 });
+
+test('charge identifiers participate in payment lookup and partial refunds retain only the net cents',async()=>{
+ let lookup;const updates=[];const db={collection:name=>({findOne:async query=>{lookup=query;return null},updateOne:async(query,change)=>{updates.push({name,query,change});return {modifiedCount:1}}})};
+ await repository.paymentForStripeObject(db,{object:'charge',id:'ch_test',payment_intent:'pi_test'});
+ assert.deepEqual(lookup.$or,[{stripePaymentIntentId:'pi_test'},{stripeChargeId:'ch_test'}]);
+ const row={_id:'p',amountCents:1000,stripePaymentIntentId:'pi_test'};
+ assert.equal(await repository.adjustPayment(db,row,{status:'partially_refunded',netAmountCents:700,chargeId:'ch_test',from:['paid','partially_refunded']}),true);
+ const update=updates.find(item=>item.name==='donation_payments');assert.deepEqual(update.query.status.$in,['paid','partially_refunded']);
+ assert.equal(update.change.$set.netAmountCents,700);
+});
+
+test('the donation panel queries availability and keeps checkout disabled when Stripe is unavailable',()=>{
+ const client=fs.readFileSync('js/donations.js','utf8'),routes=fs.readFileSync('modules/donations/index.js','utf8');
+ assert.match(client,/api\/donations\/config/);assert.match(client,/Doações em breve/);
+ assert.match(routes,/checkoutAvailable:checkout\.configured\(\)/);
+});

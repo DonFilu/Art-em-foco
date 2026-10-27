@@ -22,6 +22,7 @@ async function route(req,res,pathname,{sessionInfo,getDatabase,json,readJSON,rea
  try{
   const info=await sessionInfo(req);if(!info?.user)return json(res,401,{error:'Entre com Google para acessar doações'}),true;
   const db=await getDatabase();await repository.ensureIndexes(db);
+  if(pathname==='/api/donations/config'&&req.method==='GET')return json(res,200,{checkoutAvailable:checkout.configured()}),true;
   if(pathname==='/api/donations/history'&&req.method==='GET')return json(res,200,await repository.history(db,info.user)),true;
   if(pathname==='/api/donations/csrf'&&req.method==='GET')return json(res,200,{csrfToken:await csrf(db,info.session)}),true;
   if(pathname==='/api/donations/checkout'&&req.method==='POST'){
